@@ -3,19 +3,19 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import Character from "./components/character/Character";
 import CompanionPanel, { type PanelMode } from "./components/companion/CompanionPanel";
 import ContextMenu, { type ContextMenuAction } from "./components/ui/ContextMenu";
+import { useChat } from "./hooks/useChat";
 import type { CharacterEmotion } from "./types/character";
 import "./App.css";
 
 /**
  * App — root component for the floating desktop companion.
  *
- * Layout (transparent 320×620 Tauri window):
- *   ┌─────────────────────────────────────────┐
- *   │                                         │
- *   │         [Makima Full-body]              │  ← Anchored to bottom, floating
- *   │                                         │
- *   │     [CompanionPanel] / [ContextMenu]    │  ← Overlaid on interaction
- *   └─────────────────────────────────────────┘
+ * Phase 2: In-memory text conversation with Makima, supporting:
+ * - Left click on character opens chat panel
+ * - Seamless drag vs click detection on Makima
+ * - In-memory conversation preserved across panel open/close
+ * - Dynamic emotion updates from companion responses
+ * - Right-click menu (Hide / Settings / Exit)
  */
 
 interface CtxState {
@@ -35,13 +35,15 @@ function App() {
   const dragTriggeredRef = useRef(false);
   const startPosRef = useRef({ x: 0, y: 0 });
 
-  /* ── Helpers ──────────────────────────────────────────────────────────── */
+  /* ── Emotion handler from chat ────────────────────────────────────────── */
+  const handleEmotionChange = useCallback((newEmotion: CharacterEmotion) => {
+    setEmotion(newEmotion);
+  }, []);
 
-  /** Show an emotion briefly, then return to neutral. */
-  const flashEmotion = (e: CharacterEmotion, ms = 1400) => {
-    setEmotion(e);
-    setTimeout(() => setEmotion("neutral"), ms);
-  };
+  /* ── In-memory chat hook (Phase 2) ────────────────────────────────────── */
+  const { messages, isTyping, sendMessage, clearChat } = useChat({
+    onEmotionChange: handleEmotionChange,
+  });
 
   /* ── Character click vs drag handling ─────────────────────────────────── */
 
@@ -49,8 +51,13 @@ function App() {
     if (e.button !== 0) return; // Only track left-click
     const target = e.target as HTMLElement;
 
-    // Do not initiate window drag if clicking inside panel or context menu
-    if (target.closest(".companion-panel") || target.closest(".context-menu")) {
+    // Do not initiate window drag if interacting with chat or context menu
+    if (
+      target.closest(".companion-panel") ||
+      target.closest(".companion-chat-wrapper") ||
+      target.closest(".chat-panel") ||
+      target.closest(".context-menu")
+    ) {
       return;
     }
 
@@ -99,7 +106,6 @@ function App() {
     }
     setPanelMode("chat");
     setPanelOpen((prev) => !prev);
-    flashEmotion("happy");
   };
 
   /* ── Right-click → show context menu ─────────────────────────────────── */
@@ -170,11 +176,16 @@ function App() {
         onClick={handleCharacterClick}
       />
 
-      {/* Companion panel — chat or settings */}
+      {/* Companion panel — Chat (Phase 2) or Settings */}
       <CompanionPanel
         open={panelOpen}
         mode={panelMode}
         onClose={() => setPanelOpen(false)}
+        messages={messages}
+        isTyping={isTyping}
+        onSendMessage={sendMessage}
+        onClearChat={clearChat}
+        companionName="Makima"
       />
 
       {/* Right-click context menu */}
