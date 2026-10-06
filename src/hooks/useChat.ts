@@ -1,7 +1,7 @@
-import { useState, useCallback, useRef } from "react";
-import type { ChatMessage, ChatResponse } from "../types/chat";
+import { useState, useCallback, useRef, useEffect } from "react";
+import type { ChatMessage, ChatResponse, ConnectionStatus } from "../types/chat";
 import type { CharacterEmotion } from "../types/character";
-import { mockChatProvider, type ChatProvider } from "../services/chat/mockChatProvider";
+import { localAIProvider, type ChatProvider } from "../services/chat";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -12,15 +12,17 @@ export interface UseChatOptions {
 export interface UseChatReturn {
   messages: ChatMessage[];
   isTyping: boolean;
+  connectionStatus: ConnectionStatus;
   sendMessage: (content: string) => Promise<void>;
   clearChat: () => void;
+  refreshConnection: () => Promise<void>;
 }
 
 const DEFAULT_GREETING = "Hello. What are you working on today?";
 
 export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const {
-    provider = mockChatProvider,
+    provider = localAIProvider,
     onEmotionChange,
     initialGreeting = DEFAULT_GREETING,
   } = options;
@@ -35,10 +37,29 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
   const [messages, setMessages] = useState<ChatMessage[]>(() => [createInitialMessage()]);
   const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
 
   // Keep a ref of current messages to prevent race conditions during async replies
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
+
+  const refreshConnection = useCallback(async () => {
+    if (provider.checkConnection) {
+      try {
+        const status = await provider.checkConnection();
+        setConnectionStatus(status);
+      } catch {
+        setConnectionStatus("offline");
+      }
+    } else {
+      setConnectionStatus("online");
+    }
+  }, [provider]);
+
+  // Initial connection check on mount
+  useEffect(() => {
+    refreshConnection();
+  }, [refreshConnection]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -69,17 +90,21 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
 
         setMessages((prev) => [...prev, companionMsg]);
 
+        // Refresh connection state in case it changed
+        refreshConnection();
+
         // Notify character layer of emotion update
         if (response.emotion && onEmotionChange) {
           onEmotionChange(response.emotion);
         }
       } catch (err) {
         console.error("[useChat] Error generating response:", err);
+        setConnectionStatus("offline");
       } finally {
         setIsTyping(false);
       }
     },
-    [isTyping, onEmotionChange, provider]
+    [isTyping, onEmotionChange, provider, refreshConnection]
   );
 
   const clearChat = useCallback(() => {
@@ -93,8 +118,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   return {
     messages,
     isTyping,
+    connectionStatus,
     sendMessage,
     clearChat,
+    refreshConnection,
   };
 }
-

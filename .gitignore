@@ -23,7 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-.env.example
+.env
+.env*.local
+!.env.example
 docs/
 source code
 database/migrations/

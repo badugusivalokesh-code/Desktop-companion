@@ -50,8 +50,28 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.chat-status-dot--online {
   background: #34d399;
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
+}
+
+.chat-status-dot--offline {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+}
+
+.chat-status-dot--connecting {
+  background: #f59e0b;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+  animation: dotPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
 }
 
 .chat-title-group {
@@ -70,7 +90,7 @@
 
 .chat-subtitle {
   font-size: 9px;
-  color: rgba(52, 211, 153, 0.85);
+  color: rgba(200, 215, 255, 0.6);
   line-height: 1;
 }
 

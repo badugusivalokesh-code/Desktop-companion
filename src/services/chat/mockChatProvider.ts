@@ -1,15 +1,7 @@
-import type { ChatMessage, ChatResponse } from "../../types/chat";
+import type { ChatMessage, ChatResponse, ConnectionStatus } from "../../types/chat";
+import type { ChatProvider } from "./chatProvider";
 
-/**
- * ChatProvider interface.
- *
- * NOTE: In Phase 2, this is backed by MockChatProvider for in-memory UI testing.
- * In Phase 3, this will be replaced with a LocalLlmProvider connecting to
- * an on-device model (e.g. Ollama / llama.cpp / local engine).
- */
-export interface ChatProvider {
-  sendMessage(message: string, history?: ChatMessage[]): Promise<ChatResponse>;
-}
+export type { ChatProvider };
 
 /**
  * Mock response rule mapping keyword patterns to in-character replies and emotions.
@@ -83,8 +75,8 @@ const DEFAULT_RESPONSES: ChatResponse[] = [
 /**
  * MockChatProvider
  *
- * Simulates a companion AI response with a short delay (500ms - 800ms)
- * to exercise typing indicators and emotion updates.
+ * Simulates an in-character AI response with a short delay (500ms - 800ms).
+ * Kept for testing, offline demonstrations, and fallback.
  */
 export class MockChatProvider implements ChatProvider {
   private responseIndex = 0;
@@ -110,11 +102,14 @@ export class MockChatProvider implements ChatProvider {
     return fallback;
   }
 
+  async checkConnection(): Promise<ConnectionStatus> {
+    return "online";
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
-/** Singleton instance used across Phase 2 */
+/** Singleton instance used for testing and fallback */
 export const mockChatProvider = new MockChatProvider();
-

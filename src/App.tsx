@@ -10,11 +10,12 @@ import "./App.css";
 /**
  * App — root component for the floating desktop companion.
  *
- * Phase 2: In-memory text conversation with Makima, supporting:
- * - Left click on character opens chat panel
+ * Phase 3: Real Local AI integration with Ollama runtime, supporting:
+ * - Real local LLM text conversation via LocalAIProvider
+ * - Live connection status (Connecting, Local AI Online, Local AI Offline)
  * - Seamless drag vs click detection on Makima
  * - In-memory conversation preserved across panel open/close
- * - Dynamic emotion updates from companion responses
+ * - Dynamic emotion updates from local AI responses
  * - Right-click menu (Hide / Settings / Exit)
  */
 
@@ -40,8 +41,15 @@ function App() {
     setEmotion(newEmotion);
   }, []);
 
-  /* ── In-memory chat hook (Phase 2) ────────────────────────────────────── */
-  const { messages, isTyping, sendMessage, clearChat } = useChat({
+  /* ── Local AI chat hook (Phase 3) ─────────────────────────────────────── */
+  const {
+    messages,
+    isTyping,
+    connectionStatus,
+    sendMessage,
+    clearChat,
+    refreshConnection,
+  } = useChat({
     onEmotionChange: handleEmotionChange,
   });
 
@@ -55,6 +63,7 @@ function App() {
     if (
       target.closest(".companion-panel") ||
       target.closest(".companion-chat-wrapper") ||
+      target.closest(".quick-chat-wrapper") ||
       target.closest(".chat-panel") ||
       target.closest(".context-menu")
     ) {
@@ -92,8 +101,18 @@ function App() {
     const onGlobalMouseUp = () => {
       isMouseDownRef.current = false;
     };
+    const onGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPanelOpen(false);
+        setCtx((prev) => ({ ...prev, open: false }));
+      }
+    };
     window.addEventListener("mouseup", onGlobalMouseUp);
-    return () => window.removeEventListener("mouseup", onGlobalMouseUp);
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => {
+      window.removeEventListener("mouseup", onGlobalMouseUp);
+      window.removeEventListener("keydown", onGlobalKeyDown);
+    };
   }, []);
 
   /* ── Character left-click → open chat panel ───────────────────────────── */
@@ -105,7 +124,13 @@ function App() {
       return;
     }
     setPanelMode("chat");
-    setPanelOpen((prev) => !prev);
+    setPanelOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        refreshConnection();
+      }
+      return next;
+    });
   };
 
   /* ── Right-click → show context menu ─────────────────────────────────── */
@@ -141,6 +166,7 @@ function App() {
       label: "Settings",
       icon: "⚙️",
       onClick: () => {
+        refreshConnection();
         setPanelMode("settings");
         setPanelOpen(true);
       },
@@ -176,13 +202,14 @@ function App() {
         onClick={handleCharacterClick}
       />
 
-      {/* Companion panel — Chat (Phase 2) or Settings */}
+      {/* Companion panel — Chat (Phase 3) or Settings */}
       <CompanionPanel
         open={panelOpen}
         mode={panelMode}
         onClose={() => setPanelOpen(false)}
         messages={messages}
         isTyping={isTyping}
+        connectionStatus={connectionStatus}
         onSendMessage={sendMessage}
         onClearChat={clearChat}
         companionName="Makima"

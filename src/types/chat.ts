@@ -15,3 +15,4 @@ export interface ChatResponse {
   emotion: CharacterEmotion;
 }
 
+export type ConnectionStatus = "connecting" | "online" | "offline";

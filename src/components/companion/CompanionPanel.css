@@ -4,12 +4,22 @@
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: flex-end;
   justify-content: center;
-  padding-bottom: 8px;
   /* click-through on the transparent gap */
   pointer-events: none;
   z-index: 100;
+}
+
+/* Chat mode: placed at the top above Makima */
+.panel-overlay--chat {
+  align-items: flex-start;
+  padding-top: 12px;
+}
+
+/* Settings mode: placed at the bottom */
+.panel-overlay--settings {
+  align-items: flex-end;
+  padding-bottom: 8px;
 }
 
 .companion-chat-wrapper {
@@ -129,7 +139,6 @@
   color: rgba(255, 255, 255, 0.18);
   letter-spacing: 0.04em;
 }
-
 
 /* ─── Settings mode ─────────────────────────────────────────────────────────── */
 

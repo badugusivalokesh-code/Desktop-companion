@@ -1,11 +1,12 @@
 import React from "react";
-import type { ChatMessage } from "../../types/chat";
+import type { ChatMessage, ConnectionStatus } from "../../types/chat";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   isTyping: boolean;
+  connectionStatus?: ConnectionStatus;
   onSendMessage: (content: string) => void;
   onClearChat: () => void;
   onClose: () => void;
@@ -15,22 +16,41 @@ interface ChatPanelProps {
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   messages,
   isTyping,
+  connectionStatus = "connecting",
   onSendMessage,
   onClearChat,
   onClose,
   companionName = "Makima",
 }) => {
+  const getStatusDetails = () => {
+    switch (connectionStatus) {
+      case "online":
+        return { label: "Local AI Online", className: "chat-status-dot--online" };
+      case "offline":
+        return { label: "Local AI Offline", className: "chat-status-dot--offline" };
+      case "connecting":
+      default:
+        return { label: "Connecting", className: "chat-status-dot--connecting" };
+    }
+  };
+
+  const status = getStatusDetails();
+
   return (
     <div className="chat-panel" role="region" aria-label="Conversation panel">
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <header className="chat-header">
         <div className="chat-header-info">
           <div className="chat-avatar-status">
-            <span className="chat-status-dot" aria-hidden="true" />
+            <span
+              className={`chat-status-dot ${status.className}`}
+              aria-hidden="true"
+              title={status.label}
+            />
           </div>
           <div className="chat-title-group">
             <h2 className="chat-title">{companionName}</h2>
-            <span className="chat-subtitle">Online</span>
+            <span className="chat-subtitle">{status.label}</span>
           </div>
         </div>
 
@@ -83,4 +103,3 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     </div>
   );
 };
-

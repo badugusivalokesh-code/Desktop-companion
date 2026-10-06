@@ -1,0 +1,239 @@
+/* ─── Quick Chat Container ─────────────────────────────────────────────────── */
+
+.quick-chat-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 320px;
+  max-width: calc(100% - 24px);
+  pointer-events: all;
+  user-select: text;
+  animation: quickChatIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes quickChatIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── Single-Line Input Bar ───────────────────────────────────────────────── */
+
+.quick-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 38px;
+  background: rgba(13, 15, 28, 0.92);
+  border: 1px solid rgba(110, 140, 255, 0.35);
+  border-radius: 19px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.6),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  padding: 0 12px;
+  transition: all 0.2s ease;
+}
+
+.quick-input-bar:focus-within {
+  border-color: rgba(130, 165, 255, 0.65);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.65),
+    0 0 12px rgba(110, 150, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* ─── Status Indicator Dot ────────────────────────────────────────────────── */
+
+.quick-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+.quick-chat-status--online .quick-status-dot,
+.quick-status-dot.quick-chat-status--online {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+}
+
+.quick-chat-status--offline .quick-status-dot,
+.quick-status-dot.quick-chat-status--offline {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+.quick-chat-status--connecting .quick-status-dot,
+.quick-status-dot.quick-chat-status--connecting {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+  animation: quickDotPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes quickDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* ─── Input Field ─────────────────────────────────────────────────────────── */
+
+.quick-input-field {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: #f0f4ff;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+  padding: 0;
+  caret-color: #8faaff;
+}
+
+.quick-input-field::placeholder {
+  color: rgba(220, 230, 255, 0.4);
+}
+
+.quick-input-field:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* ─── Send Button ─────────────────────────────────────────────────────────── */
+
+.quick-send-btn {
+  background: rgba(100, 135, 255, 0.25);
+  border: 1px solid rgba(130, 165, 255, 0.4);
+  color: #e0e8ff;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.quick-send-btn:hover {
+  background: rgba(110, 150, 255, 0.55);
+  border-color: rgba(160, 190, 255, 0.7);
+  transform: scale(1.08);
+}
+
+/* ─── Typing Bubble ───────────────────────────────────────────────────────── */
+
+.quick-typing-bubble {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  animation: quickBubbleIn 0.18s ease-out;
+}
+
+.quick-typing-bubble .typing-indicator {
+  margin: 0;
+}
+
+.quick-typing-bubble .typing-bubble {
+  background: rgba(13, 15, 28, 0.88);
+  border: 1px solid rgba(110, 140, 255, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* ─── Response Speech Bubble ──────────────────────────────────────────────── */
+
+.quick-response-bubble {
+  width: 100%;
+  background: rgba(13, 15, 28, 0.9);
+  border: 1px solid rgba(110, 140, 255, 0.3);
+  border-radius: 14px;
+  padding: 8px 12px 10px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  max-height: 130px;
+  overflow-y: auto;
+  animation: quickBubbleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes quickBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.quick-response-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  user-select: none;
+}
+
+.quick-response-name {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(160, 185, 255, 0.85);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.quick-response-dismiss {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+
+.quick-response-dismiss:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.quick-response-text {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(230, 235, 255, 0.95);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* Custom scrollbar for response text */
+.quick-response-bubble::-webkit-scrollbar {
+  width: 4px;
+}
+.quick-response-bubble::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+

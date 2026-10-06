@@ -1,6 +1,7 @@
 import React from "react";
-import type { ChatMessage } from "../../types/chat";
-import { ChatPanel } from "../chat/ChatPanel";
+import type { ChatMessage, ConnectionStatus } from "../../types/chat";
+import { QuickChat } from "../chat/QuickChat";
+import { getLocalAIConfig } from "../../config/ai";
 import "./CompanionPanel.css";
 import "../chat/chat.css";
 
@@ -17,6 +18,8 @@ interface CompanionPanelProps {
   messages: ChatMessage[];
   /** Whether Makima is currently typing a response */
   isTyping: boolean;
+  /** Live connection status to the local AI service */
+  connectionStatus?: ConnectionStatus;
   /** Callback to send a user message */
   onSendMessage: (content: string) => void;
   /** Callback to reset/clear conversation */
@@ -26,11 +29,11 @@ interface CompanionPanelProps {
 }
 
 /**
- * CompanionPanel — manages chat conversation and settings views.
+ * CompanionPanel — manages compact chat input and settings views.
  *
- * In Phase 2:
- * - mode === "chat" renders the interactive ChatPanel.
- * - mode === "settings" renders the settings placeholder.
+ * In Phase 3 UI Polish:
+ * - mode === "chat" renders the compact single-line QuickChat floating above Makima.
+ * - mode === "settings" displays local AI engine status and configuration.
  */
 const CompanionPanel: React.FC<CompanionPanelProps> = ({
   open,
@@ -38,25 +41,29 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
   onClose,
   messages,
   isTyping,
+  connectionStatus = "connecting",
   onSendMessage,
-  onClearChat,
+  onClearChat: _onClearChat,
   companionName = "Makima",
 }) => {
   if (!open) return null;
 
+  const config = getLocalAIConfig();
+
   return (
-    <div className="panel-overlay" aria-live="polite">
+    <div
+      className={`panel-overlay ${mode === "chat" ? "panel-overlay--chat" : "panel-overlay--settings"}`}
+      aria-live="polite"
+    >
       {mode === "chat" ? (
-        <div className="companion-chat-wrapper">
-          <ChatPanel
-            messages={messages}
-            isTyping={isTyping}
-            onSendMessage={onSendMessage}
-            onClearChat={onClearChat}
-            onClose={onClose}
-            companionName={companionName}
-          />
-        </div>
+        <QuickChat
+          messages={messages}
+          isTyping={isTyping}
+          connectionStatus={connectionStatus}
+          onSendMessage={onSendMessage}
+          onClose={onClose}
+          companionName={companionName}
+        />
       ) : (
         <div
           className="companion-panel"
@@ -67,7 +74,7 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
           {/* ── Settings Header ────────────────────────────────────────── */}
           <div className="panel-header">
             <h2 className="panel-title">Settings</h2>
-            <span className="panel-badge">Phase 2</span>
+            <span className="panel-badge">Phase 3</span>
             <button
               className="panel-close"
               onClick={onClose}
@@ -86,23 +93,44 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
               <span className="settings-value">Makima</span>
             </div>
             <div className="settings-row">
-              <span className="settings-icon">💬</span>
-              <span className="settings-label">Chat Engine</span>
-              <span className="settings-value">Mock (Phase 2)</span>
+              <span className="settings-icon">⚡</span>
+              <span className="settings-label">Engine</span>
+              <span className="settings-value">Ollama (Local)</span>
             </div>
             <div className="settings-row">
-              <span className="settings-icon">🪟</span>
-              <span className="settings-label">Always on top</span>
-              <span className="settings-value">On</span>
+              <span className="settings-icon">🤖</span>
+              <span className="settings-label">Model</span>
+              <span className="settings-value">{config.model}</span>
+            </div>
+            <div className="settings-row">
+              <span className="settings-icon">📡</span>
+              <span className="settings-label">Status</span>
+              <span
+                className="settings-value"
+                style={{
+                  color:
+                    connectionStatus === "online"
+                      ? "#34d399"
+                      : connectionStatus === "connecting"
+                      ? "#f59e0b"
+                      : "#ef4444",
+                }}
+              >
+                {connectionStatus === "online"
+                  ? "Connected"
+                  : connectionStatus === "connecting"
+                  ? "Connecting..."
+                  : "Offline"}
+              </span>
             </div>
             <p className="panel-placeholder-hint">
-              — Local AI engine coming in Phase 3 —
+              Target: {config.baseUrl}
             </p>
           </div>
 
           {/* ── Footer ────────────────────────────────────────────────── */}
           <div className="panel-footer">
-            <span className="panel-footer-note">Desktop AI Companion · v0.2</span>
+            <span className="panel-footer-note">Desktop AI Companion · v0.3</span>
           </div>
         </div>
       )}
