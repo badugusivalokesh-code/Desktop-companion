@@ -81,7 +81,11 @@ const DEFAULT_RESPONSES: ChatResponse[] = [
 export class MockChatProvider implements ChatProvider {
   private responseIndex = 0;
 
-  async sendMessage(message: string, _history?: ChatMessage[]): Promise<ChatResponse> {
+  async sendMessage(
+    message: string,
+    _history?: ChatMessage[],
+    _memoryContext?: string
+  ): Promise<ChatResponse> {
     const trimmed = message.trim();
 
     // Check matched rules

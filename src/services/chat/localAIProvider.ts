@@ -97,7 +97,11 @@ export class LocalAIProvider implements ChatProvider {
   /**
    * Sends the user's message along with conversation history to Ollama.
    */
-  async sendMessage(message: string, history?: ChatMessage[]): Promise<ChatResponse> {
+  async sendMessage(
+    message: string,
+    history?: ChatMessage[],
+    memoryContext?: string
+  ): Promise<ChatResponse> {
     const trimmed = message.trim();
     if (!trimmed) {
       return {
@@ -106,9 +110,14 @@ export class LocalAIProvider implements ChatProvider {
       };
     }
 
+    // Build the system prompt with optional memory context
+    const systemContent = memoryContext
+      ? `${MAKIMA_SYSTEM_PROMPT}\n\n${memoryContext}`
+      : MAKIMA_SYSTEM_PROMPT;
+
     // Build the messages payload
     const messages: OllamaChatMessage[] = [
-      { role: "system", content: MAKIMA_SYSTEM_PROMPT },
+      { role: "system", content: systemContent },
     ];
 
     // Include recent history (up to last 4 messages: 2 exchanges) to keep context small on CPU

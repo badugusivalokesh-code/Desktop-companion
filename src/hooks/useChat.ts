@@ -2,6 +2,10 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import type { ChatMessage, ChatResponse, ConnectionStatus } from "../types/chat";
 import type { CharacterEmotion } from "../types/character";
 import { localAIProvider, type ChatProvider } from "../services/chat";
+import type { Memory } from "../types/memory";
+import { memoryService } from "../services/memory/memoryService";
+import { detectMemoryIntent } from "../services/memory/memoryDetector";
+import { formatRelevantMemories } from "../services/memory/memoryRetriever";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -56,9 +60,10 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }
   }, [provider]);
 
-  // Initial connection check on mount
+  // Initial connection check & memory cleanup on mount
   useEffect(() => {
     refreshConnection();
+    memoryService.cleanupExpired().catch(() => {});
   }, [refreshConnection]);
 
   const sendMessage = useCallback(
@@ -78,7 +83,66 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       setIsTyping(true);
 
       try {
-        const response: ChatResponse = await provider.sendMessage(trimmed, messagesRef.current);
+        // Step 1: Query existing active memories
+        let existingMemories: Memory[] = [];
+        try {
+          existingMemories = await memoryService.listMemories();
+        } catch (memErr) {
+          console.warn("[useChat] Could not load memories:", memErr);
+        }
+
+        // Step 2: Check for explicit memory intent
+        const memoryDetection = detectMemoryIntent(trimmed, existingMemories);
+
+        if (memoryDetection.isMemoryIntent) {
+          // Explicit memory command: save or update memory and return in-character confirmation
+          try {
+            if (memoryDetection.targetIdToUpdate) {
+              await memoryService.updateMemory({
+                id: memoryDetection.targetIdToUpdate,
+                content: memoryDetection.cleanContent,
+                category: memoryDetection.category,
+              });
+            } else {
+              await memoryService.createMemory({
+                content: memoryDetection.cleanContent,
+                category: memoryDetection.category,
+              });
+            }
+          } catch (saveErr) {
+            console.error("[useChat] Error persisting memory:", saveErr);
+          }
+
+          // Return concise confirmation directly without calling Ollama
+          const companionMsg: ChatMessage = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            role: "companion",
+            content: memoryDetection.confirmationMessage,
+            timestamp: Date.now(),
+            emotion: "satisfied",
+          };
+
+          setMessages((prev) => [...prev, companionMsg]);
+          if (onEmotionChange) {
+            onEmotionChange("satisfied");
+          }
+          return;
+        }
+
+        // Step 3: Normal conversation — retrieve relevant memory context
+        let memoryContext = "";
+        try {
+          memoryContext = formatRelevantMemories(trimmed, existingMemories);
+        } catch (retrievalErr) {
+          console.warn("[useChat] Memory retrieval failed:", retrievalErr);
+        }
+
+        // Step 4: Dispatch to LocalAIProvider with memory context
+        const response: ChatResponse = await provider.sendMessage(
+          trimmed,
+          messagesRef.current,
+          memoryContext || undefined
+        );
 
         const companionMsg: ChatMessage = {
           id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,

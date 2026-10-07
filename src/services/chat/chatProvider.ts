@@ -12,7 +12,11 @@ export interface ChatProvider {
    * Sends a user message along with prior conversation history,
    * returning an in-character response and associated character emotion.
    */
-  sendMessage(message: string, history?: ChatMessage[]): Promise<ChatResponse>;
+  sendMessage(
+    message: string,
+    history?: ChatMessage[],
+    memoryContext?: string
+  ): Promise<ChatResponse>;
 
   /**
    * Optional health/connectivity check for local runtime providers.
