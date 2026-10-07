@@ -1,11 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import type { ChatMessage, ConnectionStatus } from "../../types/chat";
 import { QuickChat } from "../chat/QuickChat";
+import MemoryPanel from "../memory/MemoryPanel";
 import { getLocalAIConfig } from "../../config/ai";
 import "./CompanionPanel.css";
 import "../chat/chat.css";
 
-export type PanelMode = "chat" | "settings";
+export type PanelMode = "chat" | "settings" | "memory";
 
 interface CompanionPanelProps {
   /** Whether the panel is currently visible. */
@@ -29,11 +30,10 @@ interface CompanionPanelProps {
 }
 
 /**
- * CompanionPanel — manages compact chat input and settings views.
+ * CompanionPanel — manages compact chat input, settings, and memory views.
  *
- * In Phase 3 UI Polish:
- * - mode === "chat" renders the compact single-line QuickChat floating above Makima.
- * - mode === "settings" displays local AI engine status and configuration.
+ * Phase 3: chat / settings
+ * Phase 5: adds memory sub-panel accessible from settings
  */
 const CompanionPanel: React.FC<CompanionPanelProps> = ({
   open,
@@ -46,16 +46,23 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
   onClearChat: _onClearChat,
   companionName = "Makima",
 }) => {
+  // Local sub-navigation state: null = main settings, "memory" = memory panel
+  const [subView, setSubView] = useState<"memory" | null>(null);
+
   if (!open) return null;
+
+  // Reset sub-view when switching modes so re-opening settings is clean
+  const currentMode = mode;
+  if (currentMode !== "settings" && subView !== null) {
+    // (handled in useEffect below — or just gate render)
+  }
 
   const config = getLocalAIConfig();
 
-  return (
-    <div
-      className={`panel-overlay ${mode === "chat" ? "panel-overlay--chat" : "panel-overlay--settings"}`}
-      aria-live="polite"
-    >
-      {mode === "chat" ? (
+  /* ── Chat mode ─────────────────────────────────────────────────────────── */
+  if (currentMode === "chat") {
+    return (
+      <div className="panel-overlay panel-overlay--chat" aria-live="polite">
         <QuickChat
           messages={messages}
           isTyping={isTyping}
@@ -64,17 +71,28 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
           onClose={onClose}
           companionName={companionName}
         />
+      </div>
+    );
+  }
+
+  /* ── Settings / Memory mode ────────────────────────────────────────────── */
+  return (
+    <div className="panel-overlay panel-overlay--settings" aria-live="polite">
+      {/* Memory sub-panel */}
+      {(currentMode === "memory" || subView === "memory") ? (
+        <MemoryPanel onBack={() => setSubView(null)} />
       ) : (
+        /* Settings main view */
         <div
           className="companion-panel"
           role="dialog"
           aria-label="Settings panel"
           aria-modal="false"
         >
-          {/* ── Settings Header ────────────────────────────────────────── */}
+          {/* ── Settings Header ──────────────────────────────────────── */}
           <div className="panel-header">
             <h2 className="panel-title">Settings</h2>
-            <span className="panel-badge">Phase 3</span>
+            <span className="panel-badge">Phase 5</span>
             <button
               className="panel-close"
               onClick={onClose}
@@ -85,7 +103,7 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
             </button>
           </div>
 
-          {/* ── Settings Body ──────────────────────────────────────────── */}
+          {/* ── Settings Body ────────────────────────────────────────── */}
           <div className="panel-settings">
             <div className="settings-row">
               <span className="settings-icon">🎭</span>
@@ -123,14 +141,31 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
                   : "Offline"}
               </span>
             </div>
-            <p className="panel-placeholder-hint">
-              Target: {config.baseUrl}
-            </p>
+
+            {/* ── Memory navigation row ──────────────────────────────── */}
+            <div
+              className="settings-row settings-row--link"
+              role="button"
+              tabIndex={0}
+              onClick={() => setSubView("memory")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSubView("memory"); }}
+              aria-label="Open memory management"
+              title="Open memory management"
+            >
+              <span className="settings-icon">🧠</span>
+              <span className="settings-label">Memory</span>
+              <span className="settings-value" style={{ fontSize: "9.5px", color: "rgba(160,185,255,0.5)" }}>
+                Manage what Makima remembers
+              </span>
+              <span className="settings-nav-arrow">›</span>
+            </div>
+
+            <p className="panel-placeholder-hint">Target: {config.baseUrl}</p>
           </div>
 
-          {/* ── Footer ────────────────────────────────────────────────── */}
+          {/* ── Footer ──────────────────────────────────────────────── */}
           <div className="panel-footer">
-            <span className="panel-footer-note">Desktop AI Companion · v0.3</span>
+            <span className="panel-footer-note">Desktop AI Companion · v0.4</span>
           </div>
         </div>
       )}

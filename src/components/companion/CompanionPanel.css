@@ -180,3 +180,22 @@
   color: rgba(160, 180, 255, 0.9);
   font-weight: 600;
 }
+
+/* ─── Clickable navigation row (Memory entry) ──────────────────────────────── */
+
+.settings-row--link {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.settings-row--link:hover {
+  background: rgba(100, 130, 255, 0.09);
+}
+
+.settings-nav-arrow {
+  font-size: 13px;
+  color: rgba(160, 185, 255, 0.45);
+  flex-shrink: 0;
+  margin-left: 2px;
+}
