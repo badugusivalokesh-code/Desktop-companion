@@ -26,6 +26,20 @@ pub struct DatabaseState {
 
 const VALID_CATEGORIES: &[&str] = &["fact", "preference", "routine", "goal", "temporary"];
 
+const VALID_TASK_STATUSES: &[&str] = &["pending", "completed", "cancelled"];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub due_at: Option<i64>,
+    pub reminder_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub source: String,
+}
+
 pub fn init_database(app: &AppHandle) -> Result<DatabaseState, String> {
     let app_dir = app
         .path()
@@ -107,6 +121,34 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
             params![now],
         )
         .map_err(|e| format!("Failed to record migration 1: {}", e))?;
+    }
+
+    if current_version < 2 {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','completed','cancelled')),
+                due_at INTEGER,
+                reminder_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'explicit'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+            CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
+            CREATE INDEX IF NOT EXISTS idx_tasks_reminder_at ON tasks(reminder_at);
+            CREATE INDEX IF NOT EXISTS idx_tasks_created_at ON tasks(created_at DESC);",
+        )
+        .map_err(|e| format!("Failed to execute migration 2: {}", e))?;
+
+        let now = Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (2, ?1)",
+            params![now],
+        )
+        .map_err(|e| format!("Failed to record migration 2: {}", e))?;
     }
 
     Ok(())
@@ -350,6 +392,296 @@ impl DatabaseState {
 
         Ok(deleted)
     }
+
+    // ── Task operations ──────────────────────────────────────────────────────
+
+    pub fn create_task(
+        &self,
+        title: &str,
+        due_at: Option<i64>,
+        reminder_at: Option<i64>,
+    ) -> Result<Task, String> {
+        let trimmed = title.trim();
+        if trimmed.is_empty() {
+            return Err("Task title cannot be empty".to_string());
+        }
+
+        let now = Utc::now().timestamp_millis();
+        let id = Uuid::new_v4().to_string();
+
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        conn.execute(
+            "INSERT INTO tasks (id, title, status, due_at, reminder_at, created_at, updated_at, source)
+             VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, 'explicit')",
+            params![id, trimmed, due_at, reminder_at, now, now],
+        )
+        .map_err(|e| format!("Failed to insert task: {}", e))?;
+
+        Ok(Task {
+            id,
+            title: trimmed.to_string(),
+            status: "pending".to_string(),
+            due_at,
+            reminder_at,
+            created_at: now,
+            updated_at: now,
+            source: "explicit".to_string(),
+        })
+    }
+
+    pub fn list_tasks(&self, status_filter: Option<String>) -> Result<Vec<Task>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let mut query = "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                         FROM tasks WHERE 1=1"
+            .to_string();
+
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(ref status) = status_filter {
+            let s = status.trim().to_lowercase();
+            if VALID_TASK_STATUSES.contains(&s.as_str()) {
+                query.push_str(" AND status = ?");
+                params_vec.push(Box::new(s));
+            }
+        }
+
+        query.push_str(" ORDER BY created_at DESC");
+
+        let mut stmt = conn
+            .prepare(&query)
+            .map_err(|e| format!("Failed to prepare task query: {}", e))?;
+
+        let params_slice: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let rows = stmt
+            .query_map(params_slice.as_slice(), |row| {
+                Ok(Task {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    due_at: row.get(3)?,
+                    reminder_at: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    source: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("Task query failed: {}", e))?;
+
+        let mut tasks = Vec::new();
+        for r in rows {
+            if let Ok(t) = r {
+                tasks.push(t);
+            }
+        }
+        Ok(tasks)
+    }
+
+    pub fn update_task(
+        &self,
+        id: &str,
+        title: Option<String>,
+        status: Option<String>,
+        due_at: Option<Option<i64>>,
+        reminder_at: Option<Option<i64>>,
+    ) -> Result<Task, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let mut existing: Task = conn
+            .query_row(
+                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                 FROM tasks WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(Task {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        status: row.get(2)?,
+                        due_at: row.get(3)?,
+                        reminder_at: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                        source: row.get(7)?,
+                    })
+                },
+            )
+            .map_err(|_| format!("Task with id '{}' not found", id))?;
+
+        let now = Utc::now().timestamp_millis();
+
+        if let Some(t) = title {
+            let trimmed = t.trim().to_string();
+            if !trimmed.is_empty() {
+                existing.title = trimmed;
+            }
+        }
+
+        if let Some(s) = status {
+            let s_lower = s.trim().to_lowercase();
+            if VALID_TASK_STATUSES.contains(&s_lower.as_str()) {
+                existing.status = s_lower;
+            }
+        }
+
+        if let Some(d) = due_at {
+            existing.due_at = d;
+        }
+
+        if let Some(r) = reminder_at {
+            existing.reminder_at = r;
+        }
+
+        existing.updated_at = now;
+
+        conn.execute(
+            "UPDATE tasks SET title = ?1, status = ?2, due_at = ?3, reminder_at = ?4, updated_at = ?5 WHERE id = ?6",
+            params![
+                existing.title,
+                existing.status,
+                existing.due_at,
+                existing.reminder_at,
+                existing.updated_at,
+                existing.id,
+            ],
+        )
+        .map_err(|e| format!("Failed to update task: {}", e))?;
+
+        Ok(existing)
+    }
+
+    pub fn delete_task(&self, id: &str) -> Result<bool, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let rows = conn
+            .execute("DELETE FROM tasks WHERE id = ?1", params![id])
+            .map_err(|e| format!("Failed to delete task: {}", e))?;
+
+        Ok(rows > 0)
+    }
+
+    pub fn clear_tasks(&self, status_filter: Option<String>) -> Result<usize, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let deleted = if let Some(ref s) = status_filter {
+            let s_lower = s.trim().to_lowercase();
+            conn.execute(
+                "DELETE FROM tasks WHERE status = ?1",
+                params![s_lower],
+            )
+            .map_err(|e| format!("Failed to clear tasks: {}", e))?
+        } else {
+            conn.execute("DELETE FROM tasks", [])
+                .map_err(|e| format!("Failed to clear all tasks: {}", e))?
+        };
+
+        Ok(deleted)
+    }
+
+    pub fn complete_task(&self, id: &str) -> Result<Task, String> {
+        self.update_task(id, None, Some("completed".to_string()), None, None)
+    }
+
+    pub fn cancel_task(&self, id: &str) -> Result<Task, String> {
+        self.update_task(id, None, Some("cancelled".to_string()), None, None)
+    }
+
+    /// Returns pending tasks whose reminder_at <= now (due for reminder)
+    pub fn get_due_reminders(&self) -> Result<Vec<Task>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let now = Utc::now().timestamp_millis();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                 FROM tasks WHERE status = 'pending' AND reminder_at IS NOT NULL AND reminder_at <= ?1 \
+                 ORDER BY reminder_at ASC",
+            )
+            .map_err(|e| format!("Failed to prepare reminder query: {}", e))?;
+
+        let rows = stmt
+            .query_map(params![now], |row| {
+                Ok(Task {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    due_at: row.get(3)?,
+                    reminder_at: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    source: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("Reminder query failed: {}", e))?;
+
+        let mut tasks = Vec::new();
+        for r in rows {
+            if let Ok(t) = r {
+                tasks.push(t);
+            }
+        }
+        Ok(tasks)
+    }
+
+    /// Returns pending tasks whose due_at <= now (overdue)
+    pub fn get_overdue_tasks(&self) -> Result<Vec<Task>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+
+        let now = Utc::now().timestamp_millis();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                 FROM tasks WHERE status = 'pending' AND due_at IS NOT NULL AND due_at <= ?1 \
+                 ORDER BY due_at ASC",
+            )
+            .map_err(|e| format!("Failed to prepare overdue query: {}", e))?;
+
+        let rows = stmt
+            .query_map(params![now], |row| {
+                Ok(Task {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    due_at: row.get(3)?,
+                    reminder_at: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                    source: row.get(7)?,
+                })
+            })
+            .map_err(|e| format!("Overdue query failed: {}", e))?;
+
+        let mut tasks = Vec::new();
+        for r in rows {
+            if let Ok(t) = r {
+                tasks.push(t);
+            }
+        }
+        Ok(tasks)
+    }
 }
 
 #[cfg(test)]
@@ -463,5 +795,141 @@ mod tests {
 
         db.clear_memories().unwrap();
         assert_eq!(db.list_memories(None, None).unwrap().len(), 0);
+    }
+
+    // ── Task tests ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_create_and_list_task() {
+        let db = create_test_db();
+        let task = db.create_task("Call my friend", None, None).unwrap();
+
+        assert_eq!(task.title, "Call my friend");
+        assert_eq!(task.status, "pending");
+        assert!(task.due_at.is_none());
+        assert!(task.reminder_at.is_none());
+
+        let list = db.list_tasks(None).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, task.id);
+    }
+
+    #[test]
+    fn test_task_with_timestamps() {
+        let db = create_test_db();
+        let due = Utc::now().timestamp_millis() + 3_600_000; // 1h from now
+        let reminder = Utc::now().timestamp_millis() + 1_800_000; // 30m from now
+        let task = db.create_task("Meeting", Some(due), Some(reminder)).unwrap();
+
+        assert_eq!(task.due_at, Some(due));
+        assert_eq!(task.reminder_at, Some(reminder));
+    }
+
+    #[test]
+    fn test_task_complete_and_cancel() {
+        let db = create_test_db();
+        let t1 = db.create_task("Task A", None, None).unwrap();
+        let t2 = db.create_task("Task B", None, None).unwrap();
+
+        let done = db.complete_task(&t1.id).unwrap();
+        assert_eq!(done.status, "completed");
+
+        let cancelled = db.cancel_task(&t2.id).unwrap();
+        assert_eq!(cancelled.status, "cancelled");
+
+        let pending = db.list_tasks(Some("pending".to_string())).unwrap();
+        assert_eq!(pending.len(), 0);
+
+        let completed = db.list_tasks(Some("completed".to_string())).unwrap();
+        assert_eq!(completed.len(), 1);
+
+        let cancelled_list = db.list_tasks(Some("cancelled".to_string())).unwrap();
+        assert_eq!(cancelled_list.len(), 1);
+    }
+
+    #[test]
+    fn test_task_update() {
+        let db = create_test_db();
+        let task = db.create_task("Old title", None, None).unwrap();
+
+        let updated = db
+            .update_task(
+                &task.id,
+                Some("New title".to_string()),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(updated.title, "New title");
+        assert_eq!(updated.status, "pending");
+    }
+
+    #[test]
+    fn test_task_delete() {
+        let db = create_test_db();
+        let task = db.create_task("To delete", None, None).unwrap();
+        assert_eq!(db.list_tasks(None).unwrap().len(), 1);
+
+        let ok = db.delete_task(&task.id).unwrap();
+        assert!(ok);
+        assert_eq!(db.list_tasks(None).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_task_clear_by_status() {
+        let db = create_test_db();
+        let t1 = db.create_task("Pending", None, None).unwrap();
+        let t2 = db.create_task("To complete", None, None).unwrap();
+        db.complete_task(&t2.id).unwrap();
+        let _ = t1;
+
+        let deleted = db.clear_tasks(Some("completed".to_string())).unwrap();
+        assert_eq!(deleted, 1);
+        assert_eq!(db.list_tasks(None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_task_clear_all() {
+        let db = create_test_db();
+        db.create_task("Task 1", None, None).unwrap();
+        db.create_task("Task 2", None, None).unwrap();
+        assert_eq!(db.list_tasks(None).unwrap().len(), 2);
+
+        db.clear_tasks(None).unwrap();
+        assert_eq!(db.list_tasks(None).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_due_reminders_and_overdue() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000; // 1s ago
+        let future = Utc::now().timestamp_millis() + 3_600_000; // 1h from now
+
+        db.create_task("Past reminder", None, Some(past)).unwrap();
+        db.create_task("Future reminder", None, Some(future)).unwrap();
+        db.create_task("Overdue task", Some(past), None).unwrap();
+
+        let due_reminders = db.get_due_reminders().unwrap();
+        assert_eq!(due_reminders.len(), 1);
+        assert_eq!(due_reminders[0].title, "Past reminder");
+
+        let overdue = db.get_overdue_tasks().unwrap();
+        assert_eq!(overdue.len(), 1);
+        assert_eq!(overdue[0].title, "Overdue task");
+    }
+
+    #[test]
+    fn test_task_migration_does_not_break_memories() {
+        let db = create_test_db();
+        // Memories still work after v2 migration
+        let mem = db
+            .create_memory("fact", "Migration safe", None, None)
+            .unwrap();
+        assert_eq!(mem.content, "Migration safe");
+        // Tasks also work
+        let task = db.create_task("Coexist", None, None).unwrap();
+        assert_eq!(task.title, "Coexist");
     }
 }

@@ -1,7 +1,9 @@
 pub mod db;
 pub mod memory_commands;
+pub mod task_commands;
 
 use memory_commands::*;
+use task_commands::*;
 use tauri::Manager;
 
 #[tauri::command]
@@ -26,7 +28,16 @@ pub fn run() {
             memory_update,
             memory_delete,
             memory_clear,
-            memory_cleanup_expired
+            memory_cleanup_expired,
+            task_create,
+            task_list,
+            task_update,
+            task_delete,
+            task_clear,
+            task_complete,
+            task_cancel,
+            task_due_reminders,
+            task_overdue
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

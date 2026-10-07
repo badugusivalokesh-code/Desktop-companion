@@ -2,11 +2,12 @@ import React, { useState } from "react";
 import type { ChatMessage, ConnectionStatus } from "../../types/chat";
 import { QuickChat } from "../chat/QuickChat";
 import MemoryPanel from "../memory/MemoryPanel";
+import TaskPanel from "../tasks/TaskPanel";
 import { getLocalAIConfig } from "../../config/ai";
 import "./CompanionPanel.css";
 import "../chat/chat.css";
 
-export type PanelMode = "chat" | "settings" | "memory";
+export type PanelMode = "chat" | "settings" | "memory" | "tasks";
 
 interface CompanionPanelProps {
   /** Whether the panel is currently visible. */
@@ -30,10 +31,11 @@ interface CompanionPanelProps {
 }
 
 /**
- * CompanionPanel — manages compact chat input, settings, and memory views.
+ * CompanionPanel — manages compact chat input, settings, memory, and task views.
  *
  * Phase 3: chat / settings
  * Phase 5: adds memory sub-panel accessible from settings
+ * Phase 6: adds tasks & reminders sub-panel accessible from settings
  */
 const CompanionPanel: React.FC<CompanionPanelProps> = ({
   open,
@@ -46,17 +48,12 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
   onClearChat: _onClearChat,
   companionName = "Makima",
 }) => {
-  // Local sub-navigation state: null = main settings, "memory" = memory panel
-  const [subView, setSubView] = useState<"memory" | null>(null);
+  // Local sub-navigation state: null = main settings, "memory" | "tasks" = sub-panels
+  const [subView, setSubView] = useState<"memory" | "tasks" | null>(null);
 
   if (!open) return null;
 
-  // Reset sub-view when switching modes so re-opening settings is clean
   const currentMode = mode;
-  if (currentMode !== "settings" && subView !== null) {
-    // (handled in useEffect below — or just gate render)
-  }
-
   const config = getLocalAIConfig();
 
   /* ── Chat mode ─────────────────────────────────────────────────────────── */
@@ -75,12 +72,14 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
     );
   }
 
-  /* ── Settings / Memory mode ────────────────────────────────────────────── */
+  /* ── Settings / Sub-panels mode ────────────────────────────────────────── */
   return (
     <div className="panel-overlay panel-overlay--settings" aria-live="polite">
-      {/* Memory sub-panel */}
-      {(currentMode === "memory" || subView === "memory") ? (
+      {/* Sub-panel views */}
+      {currentMode === "memory" || subView === "memory" ? (
         <MemoryPanel onBack={() => setSubView(null)} />
+      ) : currentMode === "tasks" || subView === "tasks" ? (
+        <TaskPanel onBack={() => setSubView(null)} />
       ) : (
         /* Settings main view */
         <div
@@ -92,7 +91,7 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
           {/* ── Settings Header ──────────────────────────────────────── */}
           <div className="panel-header">
             <h2 className="panel-title">Settings</h2>
-            <span className="panel-badge">Phase 5</span>
+            <span className="panel-badge">Phase 6</span>
             <button
               className="panel-close"
               onClick={onClose}
@@ -148,14 +147,42 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
               role="button"
               tabIndex={0}
               onClick={() => setSubView("memory")}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSubView("memory"); }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setSubView("memory");
+              }}
               aria-label="Open memory management"
               title="Open memory management"
             >
               <span className="settings-icon">🧠</span>
               <span className="settings-label">Memory</span>
-              <span className="settings-value" style={{ fontSize: "9.5px", color: "rgba(160,185,255,0.5)" }}>
+              <span
+                className="settings-value"
+                style={{ fontSize: "9.5px", color: "rgba(160,185,255,0.5)" }}
+              >
                 Manage what Makima remembers
+              </span>
+              <span className="settings-nav-arrow">›</span>
+            </div>
+
+            {/* ── Tasks navigation row ───────────────────────────────── */}
+            <div
+              className="settings-row settings-row--link"
+              role="button"
+              tabIndex={0}
+              onClick={() => setSubView("tasks")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setSubView("tasks");
+              }}
+              aria-label="Open task management"
+              title="Open task management"
+            >
+              <span className="settings-icon">✅</span>
+              <span className="settings-label">Tasks</span>
+              <span
+                className="settings-value"
+                style={{ fontSize: "9.5px", color: "rgba(160,185,255,0.5)" }}
+              >
+                Manage your tasks and reminders
               </span>
               <span className="settings-nav-arrow">›</span>
             </div>

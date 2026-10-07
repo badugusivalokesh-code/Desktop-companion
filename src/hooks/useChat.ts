@@ -3,9 +3,18 @@ import type { ChatMessage, ChatResponse, ConnectionStatus } from "../types/chat"
 import type { CharacterEmotion } from "../types/character";
 import { localAIProvider, type ChatProvider } from "../services/chat";
 import type { Memory } from "../types/memory";
+import type { Task } from "../types/task";
 import { memoryService } from "../services/memory/memoryService";
 import { detectMemoryIntent } from "../services/memory/memoryDetector";
 import { formatRelevantMemories } from "../services/memory/memoryRetriever";
+import { taskService } from "../services/tasks/taskService";
+import {
+  detectTaskIntent,
+  resolveMatchingTask,
+} from "../services/tasks/taskDetector";
+import {
+  formatCompactTaskContext,
+} from "../services/tasks/taskRetriever";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -83,7 +92,175 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       setIsTyping(true);
 
       try {
-        // Step 1: Query existing active memories
+        // =====================================================================
+        // Step 1: Deterministic Task Intent Detection
+        // =====================================================================
+        const taskIntent = detectTaskIntent(trimmed);
+
+        if (taskIntent.intent === "create" && taskIntent.title) {
+          try {
+            // Check for duplicate pending task (same title & same timing)
+            const pendingTasks = await taskService.listTasks("pending");
+            const isDuplicate = pendingTasks.some(
+              (t) =>
+                t.title.toLowerCase() === taskIntent.title!.toLowerCase() &&
+                t.dueAt === (taskIntent.dueAt ?? null) &&
+                t.reminderAt === (taskIntent.reminderAt ?? null)
+            );
+
+            if (!isDuplicate) {
+              await taskService.createTask({
+                title: taskIntent.title,
+                dueAt: taskIntent.dueAt,
+                reminderAt: taskIntent.reminderAt,
+              });
+            }
+
+            const companionMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content:
+                taskIntent.confirmationMessage ||
+                `I've noted that down: "${taskIntent.title}".`,
+              timestamp: Date.now(),
+              emotion: "satisfied",
+            };
+
+            setMessages((prev) => [...prev, companionMsg]);
+            if (onEmotionChange) onEmotionChange("satisfied");
+            return;
+          } catch (taskErr) {
+            console.error("[useChat] Error creating task:", taskErr);
+            const errorMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content: "I had trouble saving that task, but I've kept it in mind.",
+              timestamp: Date.now(),
+              emotion: "neutral",
+            };
+            setMessages((prev) => [...prev, errorMsg]);
+            return;
+          }
+        }
+
+        if (taskIntent.intent === "complete") {
+          try {
+            const pendingTasks = await taskService.listTasks("pending");
+            const { task: matched, ambiguity } = resolveMatchingTask(
+              taskIntent.targetQuery || "",
+              pendingTasks
+            );
+
+            let replyContent = "";
+            let emotion: CharacterEmotion = "satisfied";
+
+            if (ambiguity.isAmbiguous) {
+              replyContent = ambiguity.clarificationMessage;
+              emotion = "neutral";
+            } else if (matched) {
+              await taskService.completeTask(matched.id);
+              replyContent = `I've marked "${matched.title}" as completed.`;
+            } else {
+              replyContent =
+                ambiguity.clarificationMessage ||
+                "I couldn't find a pending task matching that.";
+              emotion = "neutral";
+            }
+
+            const companionMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content: replyContent,
+              timestamp: Date.now(),
+              emotion,
+            };
+
+            setMessages((prev) => [...prev, companionMsg]);
+            if (onEmotionChange) onEmotionChange(emotion);
+            return;
+          } catch (taskErr) {
+            console.error("[useChat] Error completing task:", taskErr);
+          }
+        }
+
+        if (taskIntent.intent === "cancel") {
+          try {
+            const pendingTasks = await taskService.listTasks("pending");
+            const { task: matched, ambiguity } = resolveMatchingTask(
+              taskIntent.targetQuery || "",
+              pendingTasks
+            );
+
+            let replyContent = "";
+
+            if (ambiguity.isAmbiguous) {
+              replyContent = ambiguity.clarificationMessage;
+            } else if (matched) {
+              await taskService.cancelTask(matched.id);
+              replyContent = `I've cancelled "${matched.title}".`;
+            } else {
+              replyContent =
+                ambiguity.clarificationMessage ||
+                "I couldn't find a task matching that to cancel.";
+            }
+
+            const companionMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content: replyContent,
+              timestamp: Date.now(),
+              emotion: "neutral",
+            };
+
+            setMessages((prev) => [...prev, companionMsg]);
+            if (onEmotionChange) onEmotionChange("neutral");
+            return;
+          } catch (taskErr) {
+            console.error("[useChat] Error cancelling task:", taskErr);
+          }
+        }
+
+        if (taskIntent.intent === "query") {
+          try {
+            const pendingTasks = await taskService.listTasks("pending");
+            let replyContent = "";
+            if (pendingTasks.length === 0) {
+              replyContent = "You don't have any pending tasks right now.";
+            } else {
+              const listLines = pendingTasks
+                .slice(0, 5)
+                .map((t) => {
+                  let timeStr = "";
+                  if (t.reminderAt) {
+                    timeStr = ` (reminder: ${new Date(t.reminderAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`;
+                  } else if (t.dueAt) {
+                    timeStr = ` (due: ${new Date(t.dueAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})`;
+                  }
+                  return `• ${t.title}${timeStr}`;
+                })
+                .join("\n");
+              replyContent = `Here are your pending tasks:\n${listLines}`;
+            }
+
+            const companionMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content: replyContent,
+              timestamp: Date.now(),
+              emotion: "neutral",
+            };
+
+            setMessages((prev) => [...prev, companionMsg]);
+            if (onEmotionChange) onEmotionChange("neutral");
+            return;
+          } catch (taskErr) {
+            console.error("[useChat] Error querying tasks:", taskErr);
+          }
+        }
+
+        // =====================================================================
+        // Step 2: Query Memories & Check Memory Intent
+        // =====================================================================
         let existingMemories: Memory[] = [];
         try {
           existingMemories = await memoryService.listMemories();
@@ -91,11 +268,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           console.warn("[useChat] Could not load memories:", memErr);
         }
 
-        // Step 2: Check for explicit memory intent
         const memoryDetection = detectMemoryIntent(trimmed, existingMemories);
 
         if (memoryDetection.isMemoryIntent) {
-          // Explicit memory command: save or update memory and return in-character confirmation
           try {
             if (memoryDetection.targetIdToUpdate) {
               await memoryService.updateMemory({
@@ -113,7 +288,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             console.error("[useChat] Error persisting memory:", saveErr);
           }
 
-          // Return concise confirmation directly without calling Ollama
           const companionMsg: ChatMessage = {
             id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             role: "companion",
@@ -129,7 +303,9 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           return;
         }
 
-        // Step 3: Normal conversation — retrieve relevant memory context
+        // =====================================================================
+        // Step 3: Context Retrieval for Normal Conversation
+        // =====================================================================
         let memoryContext = "";
         try {
           memoryContext = formatRelevantMemories(trimmed, existingMemories);
@@ -137,11 +313,25 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           console.warn("[useChat] Memory retrieval failed:", retrievalErr);
         }
 
-        // Step 4: Dispatch to LocalAIProvider with memory context
+        let taskContext = "";
+        try {
+          const allTasks: Task[] = await taskService.listTasks();
+          taskContext = formatCompactTaskContext(trimmed, allTasks);
+        } catch (taskRetrievalErr) {
+          console.warn("[useChat] Task retrieval failed:", taskRetrievalErr);
+        }
+
+        const combinedContext = [memoryContext, taskContext]
+          .filter(Boolean)
+          .join("\n\n");
+
+        // =====================================================================
+        // Step 4: Dispatch to LocalAIProvider (Ollama)
+        // =====================================================================
         const response: ChatResponse = await provider.sendMessage(
           trimmed,
           messagesRef.current,
-          memoryContext || undefined
+          combinedContext || undefined
         );
 
         const companionMsg: ChatMessage = {
