@@ -35,6 +35,7 @@ pub struct Task {
     pub status: String,
     pub due_at: Option<i64>,
     pub reminder_at: Option<i64>,
+    pub reminder_notified_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub source: String,
@@ -149,6 +150,21 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
             params![now],
         )
         .map_err(|e| format!("Failed to record migration 2: {}", e))?;
+    }
+
+    if current_version < 3 {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN reminder_notified_at INTEGER",
+            [],
+        )
+        .map_err(|e| format!("Failed to execute migration 3: {}", e))?;
+
+        let now = Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (3, ?1)",
+            params![now],
+        )
+        .map_err(|e| format!("Failed to record migration 3: {}", e))?;
     }
 
     Ok(())
@@ -427,6 +443,7 @@ impl DatabaseState {
             status: "pending".to_string(),
             due_at,
             reminder_at,
+            reminder_notified_at: None,
             created_at: now,
             updated_at: now,
             source: "explicit".to_string(),
@@ -439,7 +456,7 @@ impl DatabaseState {
             .lock()
             .map_err(|_| "Database lock poisoned".to_string())?;
 
-        let mut query = "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+        let mut query = "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
                          FROM tasks WHERE 1=1"
             .to_string();
 
@@ -470,9 +487,10 @@ impl DatabaseState {
                     status: row.get(2)?,
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    source: row.get(7)?,
+                    reminder_notified_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    source: row.get(8)?,
                 })
             })
             .map_err(|e| format!("Task query failed: {}", e))?;
@@ -501,7 +519,7 @@ impl DatabaseState {
 
         let mut existing: Task = conn
             .query_row(
-                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
                  FROM tasks WHERE id = ?1",
                 params![id],
                 |row| {
@@ -511,15 +529,17 @@ impl DatabaseState {
                         status: row.get(2)?,
                         due_at: row.get(3)?,
                         reminder_at: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                        source: row.get(7)?,
+                        reminder_notified_at: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
+                        source: row.get(8)?,
                     })
                 },
             )
             .map_err(|_| format!("Task with id '{}' not found", id))?;
 
         let now = Utc::now().timestamp_millis();
+        let previous_status = existing.status.clone();
 
         if let Some(t) = title {
             let trimmed = t.trim().to_string();
@@ -540,18 +560,27 @@ impl DatabaseState {
         }
 
         if let Some(r) = reminder_at {
+            let reminder_changed = existing.reminder_at != r;
             existing.reminder_at = r;
+            if reminder_changed {
+                existing.reminder_notified_at = None;
+            }
+        }
+
+        if previous_status != "pending" && existing.status == "pending" {
+            existing.reminder_notified_at = None;
         }
 
         existing.updated_at = now;
 
         conn.execute(
-            "UPDATE tasks SET title = ?1, status = ?2, due_at = ?3, reminder_at = ?4, updated_at = ?5 WHERE id = ?6",
+            "UPDATE tasks SET title = ?1, status = ?2, due_at = ?3, reminder_at = ?4, reminder_notified_at = ?5, updated_at = ?6 WHERE id = ?7",
             params![
                 existing.title,
                 existing.status,
                 existing.due_at,
                 existing.reminder_at,
+                existing.reminder_notified_at,
                 existing.updated_at,
                 existing.id,
             ],
@@ -613,8 +642,9 @@ impl DatabaseState {
         let now = Utc::now().timestamp_millis();
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
                  FROM tasks WHERE status = 'pending' AND reminder_at IS NOT NULL AND reminder_at <= ?1 \
+                 AND reminder_notified_at IS NULL \
                  ORDER BY reminder_at ASC",
             )
             .map_err(|e| format!("Failed to prepare reminder query: {}", e))?;
@@ -627,9 +657,10 @@ impl DatabaseState {
                     status: row.get(2)?,
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    source: row.get(7)?,
+                    reminder_notified_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    source: row.get(8)?,
                 })
             })
             .map_err(|e| format!("Reminder query failed: {}", e))?;
@@ -643,6 +674,62 @@ impl DatabaseState {
         Ok(tasks)
     }
 
+    /// Records a successful native notification delivery. The row remains
+    /// pending so the task can still be completed, snoozed, or dismissed.
+    pub fn mark_reminder_notified(&self, id: &str) -> Result<bool, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+        let now = Utc::now().timestamp_millis();
+        let changed = conn
+            .execute(
+                "UPDATE tasks SET reminder_notified_at = ?1, updated_at = ?2
+                 WHERE id = ?3 AND status = 'pending' AND reminder_at IS NOT NULL
+                   AND reminder_notified_at IS NULL",
+                params![now, now, id],
+            )
+            .map_err(|e| format!("Failed to mark reminder notified: {}", e))?;
+        Ok(changed > 0)
+    }
+
+    /// Moves a pending reminder into the future and clears its delivery mark.
+    pub fn snooze_task_reminder(&self, id: &str, duration_ms: i64) -> Result<Task, String> {
+        const MIN_SNOOZE_MS: i64 = 60_000;
+        const MAX_SNOOZE_MS: i64 = 24 * 60 * 60 * 1000;
+        if !(MIN_SNOOZE_MS..=MAX_SNOOZE_MS).contains(&duration_ms) {
+            return Err("Snooze duration must be between 1 minute and 24 hours".to_string());
+        }
+
+        let task = self
+            .list_tasks(None)?
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| format!("Task with id '{}' not found", id))?;
+        if task.status != "pending" {
+            return Err("Only pending tasks can be snoozed".to_string());
+        }
+        if task.reminder_at.is_none() {
+            return Err("Task has no reminder to snooze".to_string());
+        }
+
+        let next_reminder = Utc::now().timestamp_millis() + duration_ms;
+        self.update_task(id, None, None, None, Some(Some(next_reminder)))
+    }
+
+    /// Permanently dismisses the reminder while retaining the task itself.
+    pub fn dismiss_task_reminder(&self, id: &str) -> Result<Task, String> {
+        let task = self
+            .list_tasks(None)?
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| format!("Task with id '{}' not found", id))?;
+        if task.status != "pending" {
+            return Err("Only pending tasks can dismiss reminders".to_string());
+        }
+        self.update_task(id, None, None, None, Some(None))
+    }
+
     /// Returns pending tasks whose due_at <= now (overdue)
     pub fn get_overdue_tasks(&self) -> Result<Vec<Task>, String> {
         let conn = self
@@ -653,7 +740,7 @@ impl DatabaseState {
         let now = Utc::now().timestamp_millis();
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, status, due_at, reminder_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
                  FROM tasks WHERE status = 'pending' AND due_at IS NOT NULL AND due_at <= ?1 \
                  ORDER BY due_at ASC",
             )
@@ -667,9 +754,10 @@ impl DatabaseState {
                     status: row.get(2)?,
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    source: row.get(7)?,
+                    reminder_notified_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    source: row.get(8)?,
                 })
             })
             .map_err(|e| format!("Overdue query failed: {}", e))?;
@@ -918,6 +1006,57 @@ mod tests {
         let overdue = db.get_overdue_tasks().unwrap();
         assert_eq!(overdue.len(), 1);
         assert_eq!(overdue[0].title, "Overdue task");
+    }
+
+    #[test]
+    fn test_reminder_delivery_is_not_duplicated() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let task = db.create_task("One notification", None, Some(past)).unwrap();
+
+        assert_eq!(db.get_due_reminders().unwrap().len(), 1);
+        assert!(db.mark_reminder_notified(&task.id).unwrap());
+        assert!(!db.mark_reminder_notified(&task.id).unwrap());
+        assert_eq!(db.get_due_reminders().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_snooze_persists_new_reminder_and_rearms_delivery() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let task = db.create_task("Snoozable", None, Some(past)).unwrap();
+        db.mark_reminder_notified(&task.id).unwrap();
+
+        let snoozed = db
+            .snooze_task_reminder(&task.id, 10 * 60 * 1000)
+            .unwrap();
+        assert!(snoozed.reminder_at.unwrap() > Utc::now().timestamp_millis());
+        assert!(snoozed.reminder_notified_at.is_none());
+        assert_eq!(db.get_due_reminders().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_dismiss_removes_reminder_but_keeps_task() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let task = db.create_task("Dismissible", None, Some(past)).unwrap();
+
+        let dismissed = db.dismiss_task_reminder(&task.id).unwrap();
+        assert!(dismissed.reminder_at.is_none());
+        assert_eq!(db.list_tasks(None).unwrap().len(), 1);
+        assert_eq!(db.get_due_reminders().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_completed_and_cancelled_tasks_never_have_due_reminders() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let completed = db.create_task("Already done", None, Some(past)).unwrap();
+        let cancelled = db.create_task("Already cancelled", None, Some(past)).unwrap();
+        db.complete_task(&completed.id).unwrap();
+        db.cancel_task(&cancelled.id).unwrap();
+
+        assert!(db.get_due_reminders().unwrap().is_empty());
     }
 
     #[test]

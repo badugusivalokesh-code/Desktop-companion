@@ -5,6 +5,7 @@ import CompanionPanel, { type PanelMode } from "./components/companion/Companion
 import ContextMenu, { type ContextMenuAction } from "./components/ui/ContextMenu";
 import { useChat } from "./hooks/useChat";
 import type { CharacterEmotion } from "./types/character";
+import { reminderEngine } from "./services/tasks/reminderEngine";
 import "./App.css";
 
 /**
@@ -52,6 +53,14 @@ function App() {
   } = useChat({
     onEmotionChange: handleEmotionChange,
   });
+
+  // Keep reminder checks alive at the application level. Hiding the Tauri
+  // window does not unmount this component, so native reminders continue while
+  // the companion is out of sight.
+  useEffect(() => {
+    reminderEngine.start();
+    return () => reminderEngine.stop();
+  }, []);
 
   /* ── Character click vs drag handling ─────────────────────────────────── */
 

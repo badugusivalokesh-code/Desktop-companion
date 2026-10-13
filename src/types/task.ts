@@ -13,6 +13,7 @@ export interface Task {
   status: TaskStatus;
   dueAt: number | null;
   reminderAt: number | null;
+  reminderNotifiedAt?: number | null;
   createdAt: number;
   updatedAt: number;
   source: "explicit";
@@ -20,6 +21,7 @@ export interface Task {
   // Compatibility aliases for snake_case IPC mapping
   due_at?: number | null;
   reminder_at?: number | null;
+  reminder_notified_at?: number | null;
   created_at?: number;
   updated_at?: number;
 }

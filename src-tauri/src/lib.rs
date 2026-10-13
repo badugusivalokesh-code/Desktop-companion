@@ -15,6 +15,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let db_state = db::init_database(app.handle())
                 .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
@@ -37,6 +38,9 @@ pub fn run() {
             task_complete,
             task_cancel,
             task_due_reminders,
+            task_mark_reminder_notified,
+            task_snooze_reminder,
+            task_dismiss_reminder,
             task_overdue
         ])
         .run(tauri::generate_context!())

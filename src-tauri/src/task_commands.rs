@@ -101,6 +101,43 @@ pub fn task_due_reminders(state: State<'_, DatabaseState>) -> Result<Vec<Task>, 
     state.get_due_reminders()
 }
 
+/// Mark a reminder as delivered after the native notification call succeeds.
+#[tauri::command]
+pub fn task_mark_reminder_notified(
+    state: State<'_, DatabaseState>,
+    id: String,
+) -> Result<bool, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.mark_reminder_notified(&id)
+}
+
+/// Snooze a pending reminder. The duration is persisted as the next reminder time.
+#[tauri::command]
+pub fn task_snooze_reminder(
+    state: State<'_, DatabaseState>,
+    id: String,
+    duration_ms: i64,
+) -> Result<Task, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.snooze_task_reminder(&id, duration_ms)
+}
+
+/// Dismiss a reminder without deleting or completing its task.
+#[tauri::command]
+pub fn task_dismiss_reminder(
+    state: State<'_, DatabaseState>,
+    id: String,
+) -> Result<Task, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.dismiss_task_reminder(&id)
+}
+
 /// Return pending tasks whose due_at is now or in the past (overdue).
 #[tauri::command]
 pub fn task_overdue(state: State<'_, DatabaseState>) -> Result<Vec<Task>, String> {

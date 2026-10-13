@@ -5,6 +5,8 @@ interface TaskCardProps {
   task: Task;
   onComplete: (task: Task) => void;
   onCancel: (task: Task) => void;
+  onSnooze: (task: Task) => void;
+  onDismissReminder: (task: Task) => void;
   onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
 }
@@ -43,6 +45,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
   task,
   onComplete,
   onCancel,
+  onSnooze,
+  onDismissReminder,
   onEdit,
   onDelete,
 }) => {
@@ -89,6 +93,28 @@ const TaskCard: React.FC<TaskCardProps> = ({
               >
                 🚫
               </button>
+              {task.reminderAt !== null && (
+                <>
+                  <button
+                    className="task-action-btn"
+                    onClick={() => onSnooze(task)}
+                    title="Snooze reminder for 10 minutes"
+                    aria-label="Snooze reminder for 10 minutes"
+                    type="button"
+                  >
+                    ⏱
+                  </button>
+                  <button
+                    className="task-action-btn task-action-btn--cancel"
+                    onClick={() => onDismissReminder(task)}
+                    title="Dismiss reminder"
+                    aria-label="Dismiss reminder"
+                    type="button"
+                  >
+                    🔕
+                  </button>
+                </>
+              )}
             </>
           )}
           <button

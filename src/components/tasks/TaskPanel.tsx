@@ -58,6 +58,20 @@ const TaskPanel: React.FC<TaskPanelProps> = ({ onBack }) => {
     }
   };
 
+  const handleSnooze = async (task: Task) => {
+    const updated = await taskService.snoozeReminder(task.id);
+    if (updated) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    }
+  };
+
+  const handleDismissReminder = async (task: Task) => {
+    const updated = await taskService.dismissReminder(task.id);
+    if (updated) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    }
+  };
+
   /* ── Edit ────────────────────────────────────────────────────────────────── */
 
   const handleEdit = (task: Task) => {
@@ -212,6 +226,8 @@ const TaskPanel: React.FC<TaskPanelProps> = ({ onBack }) => {
               task={t}
               onComplete={handleComplete}
               onCancel={handleCancel}
+              onSnooze={handleSnooze}
+              onDismissReminder={handleDismissReminder}
               onEdit={handleEdit}
               onDelete={handleDeleteRequest}
             />

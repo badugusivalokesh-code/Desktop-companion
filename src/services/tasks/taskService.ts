@@ -34,6 +34,12 @@ function normalizeTask(raw: any): Task {
       : raw.updated_at !== undefined
       ? raw.updated_at
       : Date.now();
+  const reminderNotifiedAt =
+    raw.reminderNotifiedAt !== undefined
+      ? raw.reminderNotifiedAt
+      : raw.reminder_notified_at !== undefined
+      ? raw.reminder_notified_at
+      : null;
 
   return {
     id: raw.id,
@@ -41,11 +47,13 @@ function normalizeTask(raw: any): Task {
     status: raw.status as TaskStatus,
     dueAt,
     reminderAt,
+    reminderNotifiedAt,
     createdAt,
     updatedAt,
     source: "explicit",
     due_at: dueAt,
     reminder_at: reminderAt,
+    reminder_notified_at: reminderNotifiedAt,
     created_at: createdAt,
     updated_at: updatedAt,
   };
@@ -176,6 +184,38 @@ class TaskService {
     } catch (err) {
       console.error("[TaskService] Failed to fetch due reminders:", err);
       return [];
+    }
+  }
+
+  /** Records that a native notification was successfully delivered. */
+  async markReminderNotified(id: string): Promise<boolean> {
+    try {
+      return !!(await invoke<boolean>("task_mark_reminder_notified", { id }));
+    } catch (err) {
+      console.error("[TaskService] Failed to mark reminder notified:", err);
+      return false;
+    }
+  }
+
+  /** Snoozes a reminder by moving its persisted reminder time into the future. */
+  async snoozeReminder(id: string, durationMs = 10 * 60 * 1000): Promise<Task | null> {
+    try {
+      const raw = await invoke<any>("task_snooze_reminder", { id, durationMs });
+      return raw ? normalizeTask(raw) : null;
+    } catch (err) {
+      console.error("[TaskService] Failed to snooze reminder:", err);
+      return null;
+    }
+  }
+
+  /** Dismisses the reminder while retaining the task. */
+  async dismissReminder(id: string): Promise<Task | null> {
+    try {
+      const raw = await invoke<any>("task_dismiss_reminder", { id });
+      return raw ? normalizeTask(raw) : null;
+    } catch (err) {
+      console.error("[TaskService] Failed to dismiss reminder:", err);
+      return null;
     }
   }
 
