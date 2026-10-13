@@ -1,5 +1,6 @@
 import React from "react";
 import type { Task, TaskStatus } from "../../types/task";
+import { formatRecurrenceRule } from "../../services/tasks/recurrence";
 
 interface TaskCardProps {
   task: Task;
@@ -7,6 +8,8 @@ interface TaskCardProps {
   onCancel: (task: Task) => void;
   onSnooze: (task: Task) => void;
   onDismissReminder: (task: Task) => void;
+  onPauseRecurrence: (task: Task) => void;
+  onResumeRecurrence: (task: Task) => void;
   onEdit: (task: Task) => void;
   onDelete: (task: Task) => void;
 }
@@ -47,12 +50,16 @@ const TaskCard: React.FC<TaskCardProps> = ({
   onCancel,
   onSnooze,
   onDismissReminder,
+  onPauseRecurrence,
+  onResumeRecurrence,
   onEdit,
   onDelete,
 }) => {
   const isPending = task.status === "pending";
   const isCompleted = task.status === "completed";
   const isCancelled = task.status === "cancelled";
+  const isRecurring = Boolean(task.recurrence);
+  const isPaused = isRecurring && task.recurrencePausedAt !== null && task.recurrencePausedAt !== undefined;
   const isOverdue =
     isPending && task.dueAt !== null && task.dueAt < Date.now();
 
@@ -93,6 +100,19 @@ const TaskCard: React.FC<TaskCardProps> = ({
               >
                 🚫
               </button>
+              {isRecurring && (
+                <button
+                  className="task-action-btn"
+                  onClick={() =>
+                    isPaused ? onResumeRecurrence(task) : onPauseRecurrence(task)
+                  }
+                  title={isPaused ? "Resume recurring schedule" : "Pause recurring schedule"}
+                  aria-label={isPaused ? "Resume recurring schedule" : "Pause recurring schedule"}
+                  type="button"
+                >
+                  {isPaused ? "▶" : "⏸"}
+                </button>
+              )}
               {task.reminderAt !== null && (
                 <>
                   <button
@@ -147,6 +167,11 @@ const TaskCard: React.FC<TaskCardProps> = ({
       </div>
 
       <div className="task-card-meta">
+        {isRecurring && task.recurrence && (
+          <span className="task-time-pill task-time-pill--reminder" title="Recurring schedule">
+            ↻ {isPaused ? "Paused · " : ""}{formatRecurrenceRule(task.recurrence)}
+          </span>
+        )}
         {task.dueAt !== null && (
           <span
             className={`task-time-pill ${

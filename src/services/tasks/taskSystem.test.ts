@@ -1,5 +1,6 @@
-import { parseNaturalDateTime } from "./dateTimeParser";
+import { parseNaturalDateTime, parseNaturalRecurrence } from "./dateTimeParser";
 import { detectTaskIntent, resolveMatchingTask } from "./taskDetector";
+import { calculateNextOccurrence } from "./recurrence";
 import {
   getPendingTasks,
   formatCompactTaskContext,
@@ -215,4 +216,68 @@ const refDate = new Date(2026, 9, 7, 9, 0, 0);
   console.log("✔ Test 10: Compact task context formatted correctly:\n" + contextStr);
 }
 
-console.log("\nALL 10 TEST SUITES PASSED SUCCESSFULLY!");
+console.log("\nBASE TASK TEST SUITES PASSED SUCCESSFULLY!");
+
+// Test 11: Recurrence parser and detector
+{
+  const daily = detectTaskIntent("Remind me every day at 8 AM to exercise.", refDate);
+  strictEqual(daily.intent, "create");
+  strictEqual(daily.title, "Exercise");
+  strictEqual(daily.recurrence?.kind, "daily");
+  strictEqual(daily.recurrence?.time, "08:00");
+
+  const weekly = parseNaturalRecurrence("Remind me every Monday and Wednesday at 9 AM to plan my week", refDate);
+  assert(weekly !== null && weekly.rule.kind === "weekly");
+  strictEqual(weekly.rule.weekdays.join(","), "1,3");
+
+  const weekdays = parseNaturalRecurrence("Remind me every weekday at 6 PM to study", refDate);
+  assert(weekdays !== null && weekdays.rule.kind === "weekdays");
+  strictEqual(weekdays.rule.time, "18:00");
+
+  const monthly = parseNaturalRecurrence("Remind me on the 15th of every month at 10 AM to pay my bill", refDate);
+  assert(monthly !== null && monthly.rule.kind === "monthly");
+  strictEqual(monthly.rule.dayOfMonth, 15);
+  console.log("✔ Test 11: Daily, selected weekday, weekday, and monthly recurrence parsed");
+}
+
+// Test 12: Ambiguous recurrence asks for missing scheduling information
+{
+  const ambiguous = detectTaskIntent("Remind me every day to exercise", refDate);
+  strictEqual(ambiguous.intent, "clarify");
+  assert(ambiguous.clarificationMessage?.includes("time"));
+  console.log("✔ Test 12: Ambiguous recurring schedule requests clarification");
+}
+
+// Test 13: Next occurrence calculation, month-end clamping, and DST-safe wall time
+{
+  const monthly31 = calculateNextOccurrence(
+    { kind: "monthly", dayOfMonth: 31, time: "09:00" },
+    new Date("2026-02-01T00:00:00.000Z"),
+    "UTC"
+  );
+  assert(monthly31 !== null);
+  strictEqual(new Date(monthly31!).toISOString(), "2026-02-28T09:00:00.000Z");
+
+  const dailyNewYork = calculateNextOccurrence(
+    { kind: "daily", time: "09:00" },
+    new Date("2026-03-07T15:00:00.000Z"),
+    "America/New_York"
+  );
+  assert(dailyNewYork !== null && dailyNewYork > new Date("2026-03-07T15:00:00.000Z").getTime());
+  const localParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(dailyNewYork!));
+  assert(localParts.endsWith("09:00"));
+  console.log("✔ Test 13: Monthly 31st clamps to month end and DST keeps 9 AM wall time");
+}
+
+// Test 14: Recurrence lifecycle commands are distinguishable from cancellation
+{
+  strictEqual(detectTaskIntent("Stop my daily exercise reminder").intent, "cancel");
+  strictEqual(detectTaskIntent("Pause my daily exercise reminder").intent, "pause");
+  strictEqual(detectTaskIntent("Resume my daily exercise reminder").intent, "resume");
+  console.log("✔ Test 14: Stop, pause, and resume intents remain distinct");
+}

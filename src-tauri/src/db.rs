@@ -36,6 +36,9 @@ pub struct Task {
     pub due_at: Option<i64>,
     pub reminder_at: Option<i64>,
     pub reminder_notified_at: Option<i64>,
+    pub recurrence_rule: Option<String>,
+    pub recurrence_timezone: Option<String>,
+    pub recurrence_paused_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub source: String,
@@ -165,6 +168,23 @@ fn run_migrations(conn: &Connection) -> Result<(), String> {
             params![now],
         )
         .map_err(|e| format!("Failed to record migration 3: {}", e))?;
+    }
+
+    if current_version < 4 {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN recurrence_rule TEXT;
+             ALTER TABLE tasks ADD COLUMN recurrence_timezone TEXT;
+             ALTER TABLE tasks ADD COLUMN recurrence_paused_at INTEGER;
+             CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_paused_at ON tasks(recurrence_paused_at);",
+        )
+        .map_err(|e| format!("Failed to execute migration 4: {}", e))?;
+
+        let now = Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES (4, ?1)",
+            params![now],
+        )
+        .map_err(|e| format!("Failed to record migration 4: {}", e))?;
     }
 
     Ok(())
@@ -417,6 +437,17 @@ impl DatabaseState {
         due_at: Option<i64>,
         reminder_at: Option<i64>,
     ) -> Result<Task, String> {
+        self.create_task_with_recurrence(title, due_at, reminder_at, None, None)
+    }
+
+    pub fn create_task_with_recurrence(
+        &self,
+        title: &str,
+        due_at: Option<i64>,
+        reminder_at: Option<i64>,
+        recurrence_rule: Option<String>,
+        recurrence_timezone: Option<String>,
+    ) -> Result<Task, String> {
         let trimmed = title.trim();
         if trimmed.is_empty() {
             return Err("Task title cannot be empty".to_string());
@@ -431,9 +462,10 @@ impl DatabaseState {
             .map_err(|_| "Database lock poisoned".to_string())?;
 
         conn.execute(
-            "INSERT INTO tasks (id, title, status, due_at, reminder_at, created_at, updated_at, source)
-             VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, 'explicit')",
-            params![id, trimmed, due_at, reminder_at, now, now],
+            "INSERT INTO tasks (id, title, status, due_at, reminder_at, reminder_notified_at,
+             recurrence_rule, recurrence_timezone, recurrence_paused_at, created_at, updated_at, source)
+             VALUES (?1, ?2, 'pending', ?3, ?4, NULL, ?5, ?6, NULL, ?7, ?8, 'explicit')",
+            params![id, trimmed, due_at, reminder_at, recurrence_rule, recurrence_timezone, now, now],
         )
         .map_err(|e| format!("Failed to insert task: {}", e))?;
 
@@ -444,6 +476,9 @@ impl DatabaseState {
             due_at,
             reminder_at,
             reminder_notified_at: None,
+            recurrence_rule,
+            recurrence_timezone,
+            recurrence_paused_at: None,
             created_at: now,
             updated_at: now,
             source: "explicit".to_string(),
@@ -456,7 +491,7 @@ impl DatabaseState {
             .lock()
             .map_err(|_| "Database lock poisoned".to_string())?;
 
-        let mut query = "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
+        let mut query = "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, recurrence_rule, recurrence_timezone, recurrence_paused_at, created_at, updated_at, source \
                          FROM tasks WHERE 1=1"
             .to_string();
 
@@ -488,9 +523,12 @@ impl DatabaseState {
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
                     reminder_notified_at: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    source: row.get(8)?,
+                    recurrence_rule: row.get(6)?,
+                    recurrence_timezone: row.get(7)?,
+                    recurrence_paused_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    source: row.get(11)?,
                 })
             })
             .map_err(|e| format!("Task query failed: {}", e))?;
@@ -512,6 +550,27 @@ impl DatabaseState {
         due_at: Option<Option<i64>>,
         reminder_at: Option<Option<i64>>,
     ) -> Result<Task, String> {
+        self.update_task_with_recurrence(
+            id,
+            title,
+            status,
+            due_at,
+            reminder_at,
+            None,
+            None,
+        )
+    }
+
+    pub fn update_task_with_recurrence(
+        &self,
+        id: &str,
+        title: Option<String>,
+        status: Option<String>,
+        due_at: Option<Option<i64>>,
+        reminder_at: Option<Option<i64>>,
+        recurrence_rule: Option<Option<String>>,
+        recurrence_timezone: Option<Option<String>>,
+    ) -> Result<Task, String> {
         let conn = self
             .conn
             .lock()
@@ -519,7 +578,7 @@ impl DatabaseState {
 
         let mut existing: Task = conn
             .query_row(
-                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, recurrence_rule, recurrence_timezone, recurrence_paused_at, created_at, updated_at, source \
                  FROM tasks WHERE id = ?1",
                 params![id],
                 |row| {
@@ -530,9 +589,12 @@ impl DatabaseState {
                         due_at: row.get(3)?,
                         reminder_at: row.get(4)?,
                         reminder_notified_at: row.get(5)?,
-                        created_at: row.get(6)?,
-                        updated_at: row.get(7)?,
-                        source: row.get(8)?,
+                        recurrence_rule: row.get(6)?,
+                        recurrence_timezone: row.get(7)?,
+                        recurrence_paused_at: row.get(8)?,
+                        created_at: row.get(9)?,
+                        updated_at: row.get(10)?,
+                        source: row.get(11)?,
                     })
                 },
             )
@@ -540,6 +602,7 @@ impl DatabaseState {
 
         let now = Utc::now().timestamp_millis();
         let previous_status = existing.status.clone();
+        let previous_recurrence = existing.recurrence_rule.clone();
 
         if let Some(t) = title {
             let trimmed = t.trim().to_string();
@@ -571,16 +634,38 @@ impl DatabaseState {
             existing.reminder_notified_at = None;
         }
 
+        if let Some(rule) = recurrence_rule {
+            existing.recurrence_rule = rule;
+            existing.recurrence_paused_at = None;
+            if existing.recurrence_rule != previous_recurrence {
+                existing.reminder_notified_at = None;
+            }
+        }
+
+        if let Some(timezone) = recurrence_timezone {
+            existing.recurrence_timezone = timezone;
+        }
+
+        if existing.recurrence_rule.is_none() {
+            existing.recurrence_timezone = None;
+            existing.recurrence_paused_at = None;
+        }
+
         existing.updated_at = now;
 
         conn.execute(
-            "UPDATE tasks SET title = ?1, status = ?2, due_at = ?3, reminder_at = ?4, reminder_notified_at = ?5, updated_at = ?6 WHERE id = ?7",
+            "UPDATE tasks SET title = ?1, status = ?2, due_at = ?3, reminder_at = ?4,
+             reminder_notified_at = ?5, recurrence_rule = ?6, recurrence_timezone = ?7,
+             recurrence_paused_at = ?8, updated_at = ?9 WHERE id = ?10",
             params![
                 existing.title,
                 existing.status,
                 existing.due_at,
                 existing.reminder_at,
                 existing.reminder_notified_at,
+                existing.recurrence_rule,
+                existing.recurrence_timezone,
+                existing.recurrence_paused_at,
                 existing.updated_at,
                 existing.id,
             ],
@@ -642,9 +727,9 @@ impl DatabaseState {
         let now = Utc::now().timestamp_millis();
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, recurrence_rule, recurrence_timezone, recurrence_paused_at, created_at, updated_at, source \
                  FROM tasks WHERE status = 'pending' AND reminder_at IS NOT NULL AND reminder_at <= ?1 \
-                 AND reminder_notified_at IS NULL \
+                 AND reminder_notified_at IS NULL AND recurrence_paused_at IS NULL \
                  ORDER BY reminder_at ASC",
             )
             .map_err(|e| format!("Failed to prepare reminder query: {}", e))?;
@@ -658,9 +743,12 @@ impl DatabaseState {
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
                     reminder_notified_at: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    source: row.get(8)?,
+                    recurrence_rule: row.get(6)?,
+                    recurrence_timezone: row.get(7)?,
+                    recurrence_paused_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    source: row.get(11)?,
                 })
             })
             .map_err(|e| format!("Reminder query failed: {}", e))?;
@@ -718,7 +806,11 @@ impl DatabaseState {
     }
 
     /// Permanently dismisses the reminder while retaining the task itself.
-    pub fn dismiss_task_reminder(&self, id: &str) -> Result<Task, String> {
+    pub fn dismiss_task_reminder(
+        &self,
+        id: &str,
+        next_reminder_at: Option<i64>,
+    ) -> Result<Task, String> {
         let task = self
             .list_tasks(None)?
             .into_iter()
@@ -727,7 +819,105 @@ impl DatabaseState {
         if task.status != "pending" {
             return Err("Only pending tasks can dismiss reminders".to_string());
         }
+        if task.recurrence_rule.is_some() {
+            let next = next_reminder_at
+                .ok_or_else(|| "Recurring reminders need a next occurrence".to_string())?;
+            return self.update_task(id, None, None, None, Some(Some(next)));
+        }
         self.update_task(id, None, None, None, Some(None))
+    }
+
+    pub fn pause_task(&self, id: &str) -> Result<Task, String> {
+        let now = Utc::now().timestamp_millis();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE tasks SET recurrence_paused_at = ?1, reminder_notified_at = NULL, updated_at = ?2
+                 WHERE id = ?3 AND status = 'pending' AND recurrence_rule IS NOT NULL
+                   AND recurrence_paused_at IS NULL",
+                params![now, now, id],
+            )
+            .map_err(|e| format!("Failed to pause recurring task: {}", e))?;
+        drop(conn);
+        if changed == 0 {
+            return Err("Only active pending recurring tasks can be paused".to_string());
+        }
+        self.list_tasks(None)?
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| format!("Task with id '{}' not found", id))
+    }
+
+    pub fn resume_task(&self, id: &str, next_reminder_at: i64) -> Result<Task, String> {
+        if next_reminder_at <= Utc::now().timestamp_millis() {
+            return Err("A recurring task must resume at a future occurrence".to_string());
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+        let now = Utc::now().timestamp_millis();
+        let changed = conn
+            .execute(
+                "UPDATE tasks SET recurrence_paused_at = NULL, reminder_at = ?1,
+                 reminder_notified_at = NULL, updated_at = ?2
+                 WHERE id = ?3 AND status = 'pending' AND recurrence_rule IS NOT NULL
+                   AND recurrence_paused_at IS NOT NULL",
+                params![next_reminder_at, now, id],
+            )
+            .map_err(|e| format!("Failed to resume recurring task: {}", e))?;
+        drop(conn);
+        if changed == 0 {
+            return Err("Only paused pending recurring tasks can be resumed".to_string());
+        }
+        self.list_tasks(None)?
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| format!("Task with id '{}' not found", id))
+    }
+
+    pub fn advance_recurring_reminder(
+        &self,
+        id: &str,
+        expected_reminder_at: i64,
+        next_reminder_at: i64,
+    ) -> Result<bool, String> {
+        if next_reminder_at <= expected_reminder_at {
+            return Err("Next recurring occurrence must be later than the current occurrence".to_string());
+        }
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Database lock poisoned".to_string())?;
+        let now = Utc::now().timestamp_millis();
+        let changed = conn
+            .execute(
+                "UPDATE tasks SET reminder_at = ?1, reminder_notified_at = NULL, updated_at = ?2
+                 WHERE id = ?3 AND status = 'pending' AND recurrence_rule IS NOT NULL
+                   AND recurrence_paused_at IS NULL AND reminder_at = ?4
+                   AND reminder_notified_at IS NULL",
+                params![next_reminder_at, now, id, expected_reminder_at],
+            )
+            .map_err(|e| format!("Failed to advance recurring reminder: {}", e))?;
+        Ok(changed > 0)
+    }
+
+    pub fn complete_recurring_occurrence(
+        &self,
+        id: &str,
+        expected_reminder_at: i64,
+        next_reminder_at: i64,
+    ) -> Result<Task, String> {
+        if !self.advance_recurring_reminder(id, expected_reminder_at, next_reminder_at)? {
+            return Err("Recurring occurrence was changed or already delivered".to_string());
+        }
+        self.list_tasks(None)?
+            .into_iter()
+            .find(|task| task.id == id)
+            .ok_or_else(|| format!("Task with id '{}' not found", id))
     }
 
     /// Returns pending tasks whose due_at <= now (overdue)
@@ -740,7 +930,7 @@ impl DatabaseState {
         let now = Utc::now().timestamp_millis();
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, created_at, updated_at, source \
+                "SELECT id, title, status, due_at, reminder_at, reminder_notified_at, recurrence_rule, recurrence_timezone, recurrence_paused_at, created_at, updated_at, source \
                  FROM tasks WHERE status = 'pending' AND due_at IS NOT NULL AND due_at <= ?1 \
                  ORDER BY due_at ASC",
             )
@@ -755,9 +945,12 @@ impl DatabaseState {
                     due_at: row.get(3)?,
                     reminder_at: row.get(4)?,
                     reminder_notified_at: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    source: row.get(8)?,
+                    recurrence_rule: row.get(6)?,
+                    recurrence_timezone: row.get(7)?,
+                    recurrence_paused_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                    source: row.get(11)?,
                 })
             })
             .map_err(|e| format!("Overdue query failed: {}", e))?;
@@ -1041,7 +1234,7 @@ mod tests {
         let past = Utc::now().timestamp_millis() - 1_000;
         let task = db.create_task("Dismissible", None, Some(past)).unwrap();
 
-        let dismissed = db.dismiss_task_reminder(&task.id).unwrap();
+        let dismissed = db.dismiss_task_reminder(&task.id, None).unwrap();
         assert!(dismissed.reminder_at.is_none());
         assert_eq!(db.list_tasks(None).unwrap().len(), 1);
         assert_eq!(db.get_due_reminders().unwrap().len(), 0);
@@ -1057,6 +1250,74 @@ mod tests {
         db.cancel_task(&cancelled.id).unwrap();
 
         assert!(db.get_due_reminders().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_recurring_task_persists_and_advances_atomically() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let task = db
+            .create_task_with_recurrence(
+                "Daily exercise",
+                None,
+                Some(past),
+                Some(r#"{"kind":"daily","time":"08:00"}"#.to_string()),
+                Some("UTC".to_string()),
+            )
+            .unwrap();
+        assert_eq!(db.list_tasks(None).unwrap()[0].recurrence_rule.as_deref(), Some(r#"{"kind":"daily","time":"08:00"}"#));
+
+        let next = past + 86_400_000;
+        assert!(db.advance_recurring_reminder(&task.id, past, next).unwrap());
+        assert!(!db.advance_recurring_reminder(&task.id, past, next + 86_400_000).unwrap());
+        assert!(db.get_due_reminders().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_recurring_snooze_and_dismiss_keep_the_series() {
+        let db = create_test_db();
+        let past = Utc::now().timestamp_millis() - 1_000;
+        let task = db
+            .create_task_with_recurrence(
+                "Weekly planning",
+                None,
+                Some(past),
+                Some(r#"{"kind":"weekly","weekdays":[1],"time":"09:00"}"#.to_string()),
+                Some("UTC".to_string()),
+            )
+            .unwrap();
+
+        let snoozed = db.snooze_task_reminder(&task.id, 10 * 60 * 1000).unwrap();
+        assert!(snoozed.recurrence_rule.is_some());
+        assert!(snoozed.reminder_at.unwrap() > Utc::now().timestamp_millis());
+
+        let next = Utc::now().timestamp_millis() + 7 * 86_400_000;
+        let dismissed = db.dismiss_task_reminder(&task.id, Some(next)).unwrap();
+        assert!(dismissed.recurrence_rule.is_some());
+        assert_eq!(dismissed.reminder_at, Some(next));
+    }
+
+    #[test]
+    fn test_pause_resume_recurring_task_persists_across_reads() {
+        let db = create_test_db();
+        let future = Utc::now().timestamp_millis() + 3_600_000;
+        let task = db
+            .create_task_with_recurrence(
+                "Study",
+                None,
+                Some(future),
+                Some(r#"{"kind":"weekdays","time":"18:00"}"#.to_string()),
+                Some("UTC".to_string()),
+            )
+            .unwrap();
+
+        let paused = db.pause_task(&task.id).unwrap();
+        assert!(paused.recurrence_paused_at.is_some());
+        assert!(db.get_due_reminders().unwrap().is_empty());
+
+        let resumed = db.resume_task(&task.id, future + 86_400_000).unwrap();
+        assert!(resumed.recurrence_paused_at.is_none());
+        assert_eq!(resumed.reminder_at, Some(future + 86_400_000));
     }
 
     #[test]

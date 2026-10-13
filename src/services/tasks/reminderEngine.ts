@@ -1,6 +1,7 @@
 import type { Task } from "../../types/task";
 import { taskService } from "./taskService";
 import { notifyTaskReminder } from "./notificationService";
+import { calculateNextOccurrence } from "./recurrence";
 
 export interface ReminderCheckResult {
   dueReminders: Task[];
@@ -62,11 +63,24 @@ class ReminderEngine {
 
     for (const task of dueReminders) {
       if (await notifyTaskReminder(task)) {
-        const marked = await taskService.markReminderNotified(task.id);
-        if (!marked) {
-          console.warn(
-            `[ReminderEngine] Notification sent but delivery state could not be persisted for ${task.id}`
+        if (task.recurrence && task.reminderAt !== null) {
+          const next = calculateNextOccurrence(
+            task.recurrence,
+            new Date(),
+            task.recurrenceTimezone ?? undefined
           );
+          if (next === null) {
+            console.warn(`[ReminderEngine] Could not calculate next occurrence for ${task.id}`);
+          } else if (!(await taskService.advanceReminder(task.id, task.reminderAt, next))) {
+            console.warn(`[ReminderEngine] Could not persist next occurrence for ${task.id}`);
+          }
+        } else {
+          const marked = await taskService.markReminderNotified(task.id);
+          if (!marked) {
+            console.warn(
+              `[ReminderEngine] Notification sent but delivery state could not be persisted for ${task.id}`
+            );
+          }
         }
       }
     }

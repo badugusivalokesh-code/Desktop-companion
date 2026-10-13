@@ -15,12 +15,20 @@ pub fn task_create(
     title: String,
     due_at: Option<i64>,
     reminder_at: Option<i64>,
+    recurrence_rule: Option<String>,
+    recurrence_timezone: Option<String>,
 ) -> Result<Task, String> {
     let trimmed = title.trim().to_string();
     if trimmed.is_empty() {
         return Err("Task title cannot be empty.".to_string());
     }
-    state.create_task(&trimmed, due_at, reminder_at)
+    state.create_task_with_recurrence(
+        &trimmed,
+        due_at,
+        reminder_at,
+        recurrence_rule,
+        recurrence_timezone,
+    )
 }
 
 /// List all tasks. Pass `status` = "pending" | "completed" | "cancelled" to filter.
@@ -43,6 +51,9 @@ pub fn task_update(
     reminder_at: Option<i64>,
     clear_due_at: Option<bool>,
     clear_reminder_at: Option<bool>,
+    recurrence_rule: Option<String>,
+    recurrence_timezone: Option<String>,
+    clear_recurrence: Option<bool>,
 ) -> Result<Task, String> {
     let due_arg = if clear_due_at.unwrap_or(false) {
         Some(None)
@@ -54,7 +65,21 @@ pub fn task_update(
     } else {
         reminder_at.map(Some)
     };
-    state.update_task(&id, title, status, due_arg, reminder_arg)
+    let recurrence_arg = if clear_recurrence.unwrap_or(false) {
+        Some(None)
+    } else {
+        recurrence_rule.map(Some)
+    };
+    let timezone_arg = recurrence_timezone.map(Some);
+    state.update_task_with_recurrence(
+        &id,
+        title,
+        status,
+        due_arg,
+        reminder_arg,
+        recurrence_arg,
+        timezone_arg,
+    )
 }
 
 /// Permanently delete a task by id. Returns true if a row was deleted.
@@ -131,11 +156,62 @@ pub fn task_snooze_reminder(
 pub fn task_dismiss_reminder(
     state: State<'_, DatabaseState>,
     id: String,
+    next_reminder_at: Option<i64>,
 ) -> Result<Task, String> {
     if id.trim().is_empty() {
         return Err("Task id cannot be empty.".to_string());
     }
-    state.dismiss_task_reminder(&id)
+    state.dismiss_task_reminder(&id, next_reminder_at)
+}
+
+/// Atomically advances one delivered recurring occurrence to its next time.
+#[tauri::command]
+pub fn task_advance_reminder(
+    state: State<'_, DatabaseState>,
+    id: String,
+    expected_reminder_at: i64,
+    next_reminder_at: i64,
+) -> Result<bool, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.advance_recurring_reminder(&id, expected_reminder_at, next_reminder_at)
+}
+
+/// Completes one recurring occurrence and leaves the series pending.
+#[tauri::command]
+pub fn task_complete_occurrence(
+    state: State<'_, DatabaseState>,
+    id: String,
+    expected_reminder_at: i64,
+    next_reminder_at: i64,
+) -> Result<Task, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.complete_recurring_occurrence(&id, expected_reminder_at, next_reminder_at)
+}
+
+/// Pauses a recurring series without changing its task status.
+#[tauri::command]
+pub fn task_pause(state: State<'_, DatabaseState>, id: String) -> Result<Task, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.pause_task(&id)
+}
+
+/// Resumes a paused recurring series at the supplied next occurrence.
+#[tauri::command]
+pub fn task_resume(
+    state: State<'_, DatabaseState>,
+    id: String,
+    next_reminder_at: i64,
+) -> Result<Task, String> {
+    if id.trim().is_empty() {
+        return Err("Task id cannot be empty.".to_string());
+    }
+    state.resume_task(&id, next_reminder_at)
 }
 
 /// Return pending tasks whose due_at is now or in the past (overdue).

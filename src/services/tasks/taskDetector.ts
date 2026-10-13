@@ -3,7 +3,12 @@ import type {
   TaskDetectionResult,
   TaskAmbiguityResult,
 } from "../../types/task";
-import { parseNaturalDateTime, cleanTitleFromDateTime } from "./dateTimeParser";
+import {
+  parseNaturalDateTime,
+  parseNaturalRecurrence,
+  cleanTitleFromDateTime,
+} from "./dateTimeParser";
+import { formatRecurrenceRule } from "./recurrence";
 
 /**
  * Deterministic rule-based task detector for Desktop AI Companion.
@@ -24,6 +29,15 @@ const CANCELLATION_PATTERNS = [
   /^don'?t\s+remind\s+me\s+(?:about|to)\s+(?:the\s+)?(.+?)(?:\s+task)?\.?$/i,
   /^(?:please\s+)?delete\s+(?:the\s+)?(.+?)(?:\s+task)?\.?$/i,
   /^(?:please\s+)?remove\s+(?:the\s+)?(.+?)(?:\s+task)?\.?$/i,
+  /^(?:please\s+)?stop\s+(?:my\s+)?(.+?)(?:\s+reminder)?\.?$/i,
+];
+
+const PAUSE_PATTERNS = [
+  /^(?:please\s+)?pause\s+(?:my\s+)?(.+?)(?:\s+reminder)?\.?$/i,
+];
+
+const RESUME_PATTERNS = [
+  /^(?:please\s+)?resume\s+(?:my\s+)?(.+?)(?:\s+reminder)?\.?$/i,
 ];
 
 // Patterns indicating task query intent
@@ -72,85 +86,103 @@ export function detectTaskIntent(
     }
   }
 
-  // 2. Check for Completion intent
-  // "I finished the call my friend task", "Mark the React task as done", "That task is completed"
+  // 2. Check for Completion intent.
   for (const pattern of COMPLETION_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match) {
-      const rawTarget = (match[1] || "").trim();
-      const cleanedTarget = rawTarget
-        .replace(/\btask\b/gi, "")
-        .replace(/^the\s+/i, "")
-        .replace(/^[:\-\s,.]+|[:\-\s,.]+$/g, "")
-        .trim();
       return {
         intent: "complete",
-        targetQuery: cleanedTarget,
+        targetQuery: cleanActionTarget(match[1] || ""),
         confidence: 0.95,
       };
     }
   }
 
-  // 3. Check for Cancellation intent
-  // "Cancel the React task", "Don't remind me about the React task"
+  // 3. Cancellation, pause, and resume are handled before creation parsing.
   for (const pattern of CANCELLATION_PATTERNS) {
     const match = trimmed.match(pattern);
     if (match) {
-      const rawTarget = (match[1] || "").trim();
-      const cleanedTarget = rawTarget
-        .replace(/\btask\b/gi, "")
-        .replace(/^the\s+/i, "")
-        .replace(/^[:\-\s,.]+|[:\-\s,.]+$/g, "")
-        .trim();
       return {
         intent: "cancel",
-        targetQuery: cleanedTarget,
+        targetQuery: cleanActionTarget(match[1] || ""),
+        confidence: 0.95,
+      };
+    }
+  }
+  for (const pattern of PAUSE_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return {
+        intent: "pause",
+        targetQuery: cleanActionTarget(match[1] || ""),
+        confidence: 0.95,
+      };
+    }
+  }
+  for (const pattern of RESUME_PATTERNS) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return {
+        intent: "resume",
+        targetQuery: cleanActionTarget(match[1] || ""),
         confidence: 0.95,
       };
     }
   }
 
-  // 4. Check for Creation intent
-  // First, parse any natural date/time present in the message
-  const parsedTime = parseNaturalDateTime(trimmed, referenceDate);
+  // 4. Recurrence takes precedence over the one-time date parser.
+  const parsedRecurrence = parseNaturalRecurrence(trimmed, referenceDate);
+  if (parsedRecurrence?.clarificationMessage) {
+    return {
+      intent: "clarify",
+      confidence: 0.95,
+      clarificationMessage: parsedRecurrence.clarificationMessage,
+    };
+  }
+  const parsedTime = parsedRecurrence
+    ? null
+    : parseNaturalDateTime(trimmed, referenceDate);
 
-  // Check explicit creation prefixes
   for (const prefix of CREATION_PREFIXES) {
-    if (prefix.test(trimmed)) {
-      let body = trimmed.replace(prefix, "").trim();
+    if (!prefix.test(trimmed)) continue;
+    const body = trimmed.replace(prefix, "").trim();
+    const parsed = parsedRecurrence ?? parsedTime;
+    const cleanedTitle = cleanTitleFromDateTime(
+      body,
+      parsed ? parsed.matchedSnippet : ""
+    );
+    if (!cleanedTitle) continue;
 
-      // Clean title from date/time components
-      const matchedSnippet = parsedTime ? parsedTime.matchedSnippet : "";
-      const cleanedTitle = cleanTitleFromDateTime(body, matchedSnippet);
-
-      if (!cleanedTitle) {
-        continue;
-      }
-
-      const isReminder = parsedTime?.isReminder ?? /remind/i.test(trimmed);
-      const timestamp = parsedTime?.timestamp ?? null;
-
+    if (parsedRecurrence) {
       return {
         intent: "create",
         title: cleanedTitle,
-        reminderAt: isReminder ? timestamp : null,
-        dueAt: isReminder ? null : timestamp,
+        reminderAt: parsedRecurrence.timestamp,
+        dueAt: null,
+        recurrence: parsedRecurrence.rule,
+        recurrenceTimezone: parsedRecurrence.recurrenceTimezone,
         confidence: 0.95,
-        confirmationMessage: buildConfirmationMessage(
+        confirmationMessage: buildRecurrenceConfirmation(
           cleanedTitle,
-          timestamp,
-          isReminder
+          parsedRecurrence.rule
         ),
       };
     }
+
+    const isReminder = parsedTime?.isReminder ?? /remind/i.test(trimmed);
+    const timestamp = parsedTime?.timestamp ?? null;
+    return {
+      intent: "create",
+      title: cleanedTitle,
+      reminderAt: isReminder ? timestamp : null,
+      dueAt: isReminder ? null : timestamp,
+      confidence: 0.95,
+      confirmationMessage: buildConfirmationMessage(cleanedTitle, timestamp, isReminder),
+    };
   }
 
-  // Check action verbs with date/time: e.g. "Finish the SOS sheets after lunch."
   if (parsedTime && ACTION_VERBS.test(trimmed)) {
-    const cleanedTitle = cleanTitleFromDateTime(
-      trimmed,
-      parsedTime.matchedSnippet
-    );
+    const cleanedTitle = cleanTitleFromDateTime(trimmed, parsedTime.matchedSnippet);
     if (cleanedTitle) {
       const isReminder = parsedTime.isReminder;
       return {
@@ -159,17 +191,30 @@ export function detectTaskIntent(
         reminderAt: isReminder ? parsedTime.timestamp : null,
         dueAt: isReminder ? null : parsedTime.timestamp,
         confidence: 0.9,
-        confirmationMessage: buildConfirmationMessage(
-          cleanedTitle,
-          parsedTime.timestamp,
-          isReminder
-        ),
+        confirmationMessage: buildConfirmationMessage(cleanedTitle, parsedTime.timestamp, isReminder),
       };
     }
   }
 
   return { intent: "none", confidence: 0 };
 }
+
+function cleanActionTarget(rawTarget: string): string {
+  return rawTarget
+    .replace(/\btask\b/gi, "")
+    .replace(/\b(reminder|daily|weekly|weekdays?|monthly|every)\b/gi, "")
+    .replace(/^the\s+/i, "")
+    .replace(/^[:\-\s,.]+|[:\-\s,.]+$/g, "")
+    .trim();
+}
+
+function buildRecurrenceConfirmation(
+  title: string,
+  rule: import("../../types/task").RecurrenceRule
+): string {
+  return `I'll remind you ${formatRecurrenceRule(rule).toLowerCase()} to ${title.toLowerCase()}.`;
+}
+
 
 /**
  * Builds a natural, concise confirmation message from Makima.

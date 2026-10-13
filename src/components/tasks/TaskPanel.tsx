@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import type { Task, TaskStatus } from "../../types/task";
 import { taskService } from "../../services/tasks/taskService";
+import { calculateNextOccurrence } from "../../services/tasks/recurrence";
 import TaskCard from "./TaskCard";
 import TaskEditor from "./TaskEditor";
 import "./task.css";
@@ -45,7 +46,12 @@ const TaskPanel: React.FC<TaskPanelProps> = ({ onBack }) => {
   /* ── Status Actions ──────────────────────────────────────────────────────── */
 
   const handleComplete = async (task: Task) => {
-    const updated = await taskService.completeTask(task.id);
+    const next = task.recurrence && task.reminderAt !== null
+      ? calculateNextOccurrence(task.recurrence, new Date(), task.recurrenceTimezone ?? undefined)
+      : null;
+    const updated = next !== null
+      ? await taskService.completeOccurrence(task.id, task.reminderAt!, next)
+      : await taskService.completeTask(task.id);
     if (updated) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     }
@@ -66,7 +72,31 @@ const TaskPanel: React.FC<TaskPanelProps> = ({ onBack }) => {
   };
 
   const handleDismissReminder = async (task: Task) => {
-    const updated = await taskService.dismissReminder(task.id);
+    const next = task.recurrence
+      ? calculateNextOccurrence(task.recurrence, new Date(), task.recurrenceTimezone ?? undefined)
+      : null;
+    const updated = await taskService.dismissReminder(task.id, next);
+    if (updated) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    }
+  };
+
+  const handlePauseRecurrence = async (task: Task) => {
+    const updated = await taskService.pauseRecurrence(task.id);
+    if (updated) {
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    }
+  };
+
+  const handleResumeRecurrence = async (task: Task) => {
+    if (!task.recurrence) return;
+    const next = calculateNextOccurrence(
+      task.recurrence,
+      new Date(),
+      task.recurrenceTimezone ?? undefined
+    );
+    if (next === null) return;
+    const updated = await taskService.resumeRecurrence(task.id, next);
     if (updated) {
       setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
     }
@@ -228,6 +258,8 @@ const TaskPanel: React.FC<TaskPanelProps> = ({ onBack }) => {
               onCancel={handleCancel}
               onSnooze={handleSnooze}
               onDismissReminder={handleDismissReminder}
+              onPauseRecurrence={handlePauseRecurrence}
+              onResumeRecurrence={handleResumeRecurrence}
               onEdit={handleEdit}
               onDelete={handleDeleteRequest}
             />

@@ -15,6 +15,7 @@ import {
 import {
   formatCompactTaskContext,
 } from "../services/tasks/taskRetriever";
+import { calculateNextOccurrence } from "../services/tasks/recurrence";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -97,15 +98,42 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         // =====================================================================
         const taskIntent = detectTaskIntent(trimmed);
 
+        if (taskIntent.intent === "clarify") {
+          const companionMsg: ChatMessage = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            role: "companion",
+            content:
+              taskIntent.clarificationMessage ||
+              "What schedule details should I use for that reminder?",
+            timestamp: Date.now(),
+            emotion: "neutral",
+          };
+          setMessages((prev) => [...prev, companionMsg]);
+          if (onEmotionChange) onEmotionChange("neutral");
+          return;
+        }
+
         if (taskIntent.intent === "create" && taskIntent.title) {
           try {
             // Check for duplicate pending task (same title & same timing)
             const pendingTasks = await taskService.listTasks("pending");
             const isDuplicate = pendingTasks.some(
-              (t) =>
-                t.title.toLowerCase() === taskIntent.title!.toLowerCase() &&
-                t.dueAt === (taskIntent.dueAt ?? null) &&
-                t.reminderAt === (taskIntent.reminderAt ?? null)
+              (t) => {
+                if (t.title.toLowerCase() !== taskIntent.title!.toLowerCase()) return false;
+                if (taskIntent.recurrence) {
+                  return (
+                    JSON.stringify(t.recurrence ?? null) ===
+                      JSON.stringify(taskIntent.recurrence) &&
+                    (t.recurrenceTimezone ?? null) ===
+                      (taskIntent.recurrenceTimezone ?? null)
+                  );
+                }
+                return (
+                  !t.recurrence &&
+                  t.dueAt === (taskIntent.dueAt ?? null) &&
+                  t.reminderAt === (taskIntent.reminderAt ?? null)
+                );
+              }
             );
 
             if (!isDuplicate) {
@@ -113,6 +141,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
                 title: taskIntent.title,
                 dueAt: taskIntent.dueAt,
                 reminderAt: taskIntent.reminderAt,
+                recurrence: taskIntent.recurrence,
+                recurrenceTimezone: taskIntent.recurrenceTimezone,
               });
             }
 
@@ -158,8 +188,23 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
               replyContent = ambiguity.clarificationMessage;
               emotion = "neutral";
             } else if (matched) {
-              await taskService.completeTask(matched.id);
-              replyContent = `I've marked "${matched.title}" as completed.`;
+              if (matched.recurrence && matched.reminderAt !== null) {
+                const next = calculateNextOccurrence(
+                  matched.recurrence,
+                  new Date(),
+                  matched.recurrenceTimezone ?? undefined
+                );
+                if (next === null) {
+                  replyContent = "I couldn't calculate the next occurrence for that reminder.";
+                  emotion = "neutral";
+                } else {
+                  await taskService.completeOccurrence(matched.id, matched.reminderAt, next);
+                  replyContent = `I've completed this occurrence of "${matched.title}".`;
+                }
+              } else {
+                await taskService.completeTask(matched.id);
+                replyContent = `I've marked "${matched.title}" as completed.`;
+              }
             } else {
               replyContent =
                 ambiguity.clarificationMessage ||
@@ -180,6 +225,53 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
             return;
           } catch (taskErr) {
             console.error("[useChat] Error completing task:", taskErr);
+          }
+        }
+
+        if (taskIntent.intent === "pause" || taskIntent.intent === "resume") {
+          try {
+            const pendingTasks = await taskService.listTasks("pending");
+            const { task: matched, ambiguity } = resolveMatchingTask(
+              taskIntent.targetQuery || "",
+              pendingTasks
+            );
+            let replyContent = ambiguity.clarificationMessage;
+            let emotion: CharacterEmotion = "neutral";
+            if (!ambiguity.isAmbiguous && matched) {
+              if (taskIntent.intent === "pause") {
+                const updated = await taskService.pauseRecurrence(matched.id);
+                replyContent = updated
+                  ? `I've paused "${matched.title}".`
+                  : `I couldn't pause "${matched.title}". It may not be recurring.`;
+              } else if (matched.recurrence) {
+                const next = calculateNextOccurrence(
+                  matched.recurrence,
+                  new Date(),
+                  matched.recurrenceTimezone ?? undefined
+                );
+                const updated = next
+                  ? await taskService.resumeRecurrence(matched.id, next)
+                  : null;
+                replyContent = updated
+                  ? `I've resumed "${matched.title}".`
+                  : `I couldn't resume "${matched.title}".`;
+              } else {
+                replyContent = `"${matched.title}" is not a recurring reminder.`;
+              }
+              emotion = "satisfied";
+            }
+            const companionMsg: ChatMessage = {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              role: "companion",
+              content: replyContent,
+              timestamp: Date.now(),
+              emotion,
+            };
+            setMessages((prev) => [...prev, companionMsg]);
+            if (onEmotionChange) onEmotionChange(emotion);
+            return;
+          } catch (taskErr) {
+            console.error("[useChat] Error changing recurrence state:", taskErr);
           }
         }
 

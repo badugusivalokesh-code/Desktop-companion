@@ -7,9 +7,13 @@
  * - morning, afternoon, evening, after lunch
  * - "at 9", "at 9:25", "at 9 AM", "at 9:25 PM", "10:30 am", etc.
  * - "in X minutes / hours"
+ * - recurring schedules such as "every weekday at 6 PM"
  *
  * Does not invent timestamps when input is ambiguous.
  */
+
+import type { RecurrenceRule } from "../../types/task";
+import { calculateNextOccurrence, getLocalTimezone } from "./recurrence";
 
 export interface ParsedDateTimeResult {
   timestamp: number | null;
@@ -17,6 +21,135 @@ export interface ParsedDateTimeResult {
   matchedSnippet: string;
   isReminder: boolean;
   hasTime: boolean;
+}
+
+export interface ParsedRecurrenceResult {
+  rule: RecurrenceRule;
+  timestamp: number | null;
+  matchedSnippet: string;
+  recurrenceTimezone: string;
+  clarificationMessage?: string;
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+  sunday: 7,
+};
+
+function findClockTime(text: string): {
+  hour: number;
+  minute: number;
+  snippet: string;
+  index: number;
+} | null {
+  const regex = /(?:\bat\s+)?\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const rawHour = Number(match[1]);
+    const minute = match[2] ? Number(match[2]) : 0;
+    const meridian = match[3]?.toLowerCase();
+    const full = match[0].trim();
+    const hasAt = /^at\s+/i.test(full);
+    const hasColon = Boolean(match[2]);
+    const hasMeridian = Boolean(meridian);
+    if (rawHour > 23 || minute > 59 || (!hasAt && !hasColon && !hasMeridian)) continue;
+
+    let hour = rawHour;
+    if (meridian === "pm" && hour < 12) hour += 12;
+    if (meridian === "am" && hour === 12) hour = 0;
+    return { hour, minute, snippet: full, index: match.index };
+  }
+  return null;
+}
+
+/** Parses supported recurring schedule phrases without changing one-time parsing. */
+export function parseNaturalRecurrence(
+  text: string,
+  referenceDate: Date = new Date()
+): ParsedRecurrenceResult | null {
+  const lower = text.toLowerCase();
+  const timezone = getLocalTimezone();
+  let rule: RecurrenceRule | null = null;
+  let scheduleStart = -1;
+  let scheduleEnd = -1;
+
+  const monthlyMatch = lower.match(
+    /\b(?:on\s+the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+of\s+every\s+month\b/
+  );
+  if (monthlyMatch) {
+    const day = Number(monthlyMatch[1]);
+    if (day >= 1 && day <= 31) {
+      rule = { kind: "monthly", dayOfMonth: day, time: "00:00" };
+      scheduleStart = monthlyMatch.index ?? 0;
+      scheduleEnd = scheduleStart + monthlyMatch[0].length;
+    }
+  }
+
+  const weekdaysMatch = lower.match(/\bevery\s+weekdays?\b/);
+  if (!rule && weekdaysMatch) {
+    rule = { kind: "weekdays", time: "00:00" };
+    scheduleStart = weekdaysMatch.index ?? 0;
+    scheduleEnd = scheduleStart + weekdaysMatch[0].length;
+  }
+
+  const dailyMatch = lower.match(/\bevery\s+(?:day|daily)\b/);
+  if (!rule && dailyMatch) {
+    rule = { kind: "daily", time: "00:00" };
+    scheduleStart = dailyMatch.index ?? 0;
+    scheduleEnd = scheduleStart + dailyMatch[0].length;
+  }
+
+  if (!rule && /\bevery\b/.test(lower)) {
+    const weekdayMatches = [...lower.matchAll(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/g)];
+    const everyIndex = lower.indexOf("every");
+    const selected = weekdayMatches
+      .filter((match) => match.index !== undefined && match.index > everyIndex)
+      .map((match) => WEEKDAY_INDEX[match[1]])
+      .filter((day, index, all) => all.indexOf(day) === index);
+    if (selected.length > 0) {
+      rule = { kind: "weekly", weekdays: selected, time: "00:00" };
+      scheduleStart = everyIndex;
+      scheduleEnd = (weekdayMatches[selected.length - 1]?.index ?? everyIndex) +
+        (weekdayMatches[selected.length - 1]?.[0].length ?? 0);
+    } else if (/\bevery\s+(?:week|month|weekend|weekday)/.test(lower)) {
+      return {
+        rule: { kind: "daily", time: "00:00" },
+        timestamp: null,
+        matchedSnippet: lower.match(/\bevery\b.*$/)?.[0] ?? "every",
+        recurrenceTimezone: timezone,
+        clarificationMessage: "Which days and time should I use for that recurring reminder?",
+      };
+    }
+  }
+
+  if (!rule) return null;
+
+  const clock = findClockTime(text);
+  if (!clock) {
+    return {
+      rule,
+      timestamp: null,
+      matchedSnippet: text.slice(scheduleStart, scheduleEnd),
+      recurrenceTimezone: timezone,
+      clarificationMessage: "What time should I use for that recurring reminder?",
+    };
+  }
+
+  const time = `${String(clock.hour).padStart(2, "0")}:${String(clock.minute).padStart(2, "0")}`;
+  rule = { ...rule, time };
+  const end = Math.max(scheduleEnd, clock.index + clock.snippet.length);
+  const matchedSnippet = text.slice(Math.min(scheduleStart, clock.index), end).trim();
+  return {
+    rule,
+    timestamp: calculateNextOccurrence(rule, referenceDate, timezone),
+    matchedSnippet,
+    recurrenceTimezone: timezone,
+  };
 }
 
 export function parseNaturalDateTime(
@@ -208,9 +341,10 @@ export function cleanTitleFromDateTime(
 
   // Clean trailing/leading prepositions & connectors like "tomorrow at", "at", "on", "for", "by"
   cleaned = cleaned
-    .replace(/\b(tomorrow|today|tonight|morning|afternoon|evening|after lunch)\b/gi, "")
+    .replace(/\b(tomorrow|today|tonight|morning|afternoon|evening|after lunch|every|daily|weekdays?|monthly|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi, "")
     .replace(/\b(at|on|for|by|in|due)\b\s*$/i, "")
     .replace(/^\s*\b(at|on|for|by|in|due)\b/i, "")
+    .replace(/^\s*\b(to|about|for)\b\s+/i, "")
     .replace(/\s+/g, " ")
     .replace(/^[:\-\s,.]+|[:\-\s,.]+$/g, "")
     .trim();

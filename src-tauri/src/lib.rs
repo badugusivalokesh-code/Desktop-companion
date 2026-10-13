@@ -41,6 +41,10 @@ pub fn run() {
             task_mark_reminder_notified,
             task_snooze_reminder,
             task_dismiss_reminder,
+            task_advance_reminder,
+            task_complete_occurrence,
+            task_pause,
+            task_resume,
             task_overdue
         ])
         .run(tauri::generate_context!())

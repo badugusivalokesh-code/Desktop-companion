@@ -1,4 +1,5 @@
 import type { Task } from "../../types/task";
+import { formatRecurrenceRule } from "./recurrence";
 
 /**
  * Lightweight task retrieval and context formatter for LLM prompt injection.
@@ -146,6 +147,10 @@ export function formatCompactTaskContext(
       timeNote = ` — reminder ${formatTimeBrief(t.reminderAt)}`;
     } else if (t.dueAt) {
       timeNote = ` — due ${formatTimeBrief(t.dueAt)}`;
+    }
+    if (t.recurrence) {
+      timeNote += ` — ${formatRecurrenceRule(t.recurrence).toLowerCase()}`;
+      if (t.recurrencePausedAt) timeNote += " (paused)";
     }
     lines.push(`- ${t.title}${timeNote}`);
   }

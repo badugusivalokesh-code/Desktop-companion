@@ -4,6 +4,7 @@ import type {
   TaskStatus,
   CreateTaskInput,
   UpdateTaskInput,
+  RecurrenceRule,
 } from "../../types/task";
 
 /**
@@ -40,6 +41,24 @@ function normalizeTask(raw: any): Task {
       : raw.reminder_notified_at !== undefined
       ? raw.reminder_notified_at
       : null;
+  const recurrenceRaw =
+    raw.recurrenceRule !== undefined ? raw.recurrenceRule : raw.recurrence_rule;
+  let recurrence: RecurrenceRule | null = null;
+  if (recurrenceRaw) {
+    try {
+      recurrence = typeof recurrenceRaw === "string" ? JSON.parse(recurrenceRaw) : recurrenceRaw;
+    } catch (err) {
+      console.warn("[TaskService] Ignoring invalid recurrence rule:", err);
+    }
+  }
+  const recurrenceTimezone =
+    raw.recurrenceTimezone !== undefined
+      ? raw.recurrenceTimezone
+      : raw.recurrence_timezone ?? null;
+  const recurrencePausedAt =
+    raw.recurrencePausedAt !== undefined
+      ? raw.recurrencePausedAt
+      : raw.recurrence_paused_at ?? null;
 
   return {
     id: raw.id,
@@ -48,6 +67,9 @@ function normalizeTask(raw: any): Task {
     dueAt,
     reminderAt,
     reminderNotifiedAt,
+    recurrence,
+    recurrenceTimezone,
+    recurrencePausedAt,
     createdAt,
     updatedAt,
     source: "explicit",
@@ -76,6 +98,8 @@ class TaskService {
         title: input.title.trim(),
         dueAt: input.dueAt ?? null,
         reminderAt: input.reminderAt ?? null,
+        recurrenceRule: input.recurrence ? JSON.stringify(input.recurrence) : null,
+        recurrenceTimezone: input.recurrenceTimezone ?? null,
       });
       return raw ? normalizeTask(raw) : null;
     } catch (err) {
@@ -112,6 +136,9 @@ class TaskService {
         reminderAt: input.reminderAt ?? null,
         clearDueAt: input.clearDueAt ?? false,
         clearReminderAt: input.clearReminderAt ?? false,
+        recurrenceRule: input.recurrence ? JSON.stringify(input.recurrence) : null,
+        recurrenceTimezone: input.recurrenceTimezone ?? null,
+        clearRecurrence: input.clearRecurrence ?? false,
       });
       return raw ? normalizeTask(raw) : null;
     } catch (err) {
@@ -209,12 +236,67 @@ class TaskService {
   }
 
   /** Dismisses the reminder while retaining the task. */
-  async dismissReminder(id: string): Promise<Task | null> {
+  async dismissReminder(id: string, nextReminderAt: number | null = null): Promise<Task | null> {
     try {
-      const raw = await invoke<any>("task_dismiss_reminder", { id });
+      const raw = await invoke<any>("task_dismiss_reminder", { id, nextReminderAt });
       return raw ? normalizeTask(raw) : null;
     } catch (err) {
       console.error("[TaskService] Failed to dismiss reminder:", err);
+      return null;
+    }
+  }
+
+  async advanceReminder(
+    id: string,
+    expectedReminderAt: number,
+    nextReminderAt: number
+  ): Promise<boolean> {
+    try {
+      return !!(await invoke<boolean>("task_advance_reminder", {
+        id,
+        expectedReminderAt,
+        nextReminderAt,
+      }));
+    } catch (err) {
+      console.error("[TaskService] Failed to advance recurring reminder:", err);
+      return false;
+    }
+  }
+
+  async completeOccurrence(
+    id: string,
+    expectedReminderAt: number,
+    nextReminderAt: number
+  ): Promise<Task | null> {
+    try {
+      const raw = await invoke<any>("task_complete_occurrence", {
+        id,
+        expectedReminderAt,
+        nextReminderAt,
+      });
+      return raw ? normalizeTask(raw) : null;
+    } catch (err) {
+      console.error("[TaskService] Failed to complete recurring occurrence:", err);
+      return null;
+    }
+  }
+
+  async pauseRecurrence(id: string): Promise<Task | null> {
+    try {
+      const raw = await invoke<any>("task_pause", { id });
+      return raw ? normalizeTask(raw) : null;
+    } catch (err) {
+      console.error("[TaskService] Failed to pause recurrence:", err);
+      return null;
+    }
+  }
+
+  async resumeRecurrence(id: string, nextReminderAt: number): Promise<Task | null> {
+    try {
+      const raw = await invoke<any>("task_resume", { id, nextReminderAt });
+      return raw ? normalizeTask(raw) : null;
+    } catch (err) {
+      console.error("[TaskService] Failed to resume recurrence:", err);
       return null;
     }
   }
