@@ -22,5 +22,11 @@ export interface ChatProvider {
    * Optional health/connectivity check for local runtime providers.
    */
   checkConnection?(): Promise<ConnectionStatus>;
-}
 
+  /** Optional local vision capability used by explicit screen awareness. */
+  analyzeImage?(
+    imageDataUrl: string,
+    prompt: string,
+    history?: ChatMessage[]
+  ): Promise<ChatResponse>;
+}

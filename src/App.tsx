@@ -50,6 +50,12 @@ function App() {
     sendMessage,
     clearChat,
     refreshConnection,
+    capturedScreen,
+    screenCaptureState,
+    screenError,
+    captureCurrentScreen,
+    analyzeCapturedScreen,
+    clearCapturedScreen,
   } = useChat({
     onEmotionChange: handleEmotionChange,
   });
@@ -221,6 +227,12 @@ function App() {
         connectionStatus={connectionStatus}
         onSendMessage={sendMessage}
         onClearChat={clearChat}
+        capturedScreen={capturedScreen}
+        screenCaptureState={screenCaptureState}
+        screenError={screenError}
+        onCaptureScreen={captureCurrentScreen}
+        onAnalyzeScreen={analyzeCapturedScreen}
+        onClearScreen={clearCapturedScreen}
         companionName="Makima"
       />
 

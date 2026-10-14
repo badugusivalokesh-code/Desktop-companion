@@ -26,6 +26,12 @@ interface CompanionPanelProps {
   onSendMessage: (content: string) => void;
   /** Callback to reset/clear conversation */
   onClearChat: () => void;
+  capturedScreen?: string | null;
+  screenCaptureState?: "idle" | "capturing" | "preview";
+  screenError?: string | null;
+  onCaptureScreen?: () => void;
+  onAnalyzeScreen?: () => void;
+  onClearScreen?: () => void;
   /** Companion name to display */
   companionName?: string;
 }
@@ -46,6 +52,12 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
   connectionStatus = "connecting",
   onSendMessage,
   onClearChat: _onClearChat,
+  capturedScreen,
+  screenCaptureState,
+  screenError,
+  onCaptureScreen,
+  onAnalyzeScreen,
+  onClearScreen,
   companionName = "Makima",
 }) => {
   // Local sub-navigation state: null = main settings, "memory" | "tasks" = sub-panels
@@ -67,6 +79,12 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
           onSendMessage={onSendMessage}
           onClose={onClose}
           companionName={companionName}
+          capturedScreen={capturedScreen}
+          screenCaptureState={screenCaptureState}
+          screenError={screenError}
+          onCaptureScreen={onCaptureScreen}
+          onAnalyzeScreen={onAnalyzeScreen}
+          onClearScreen={onClearScreen}
         />
       </div>
     );

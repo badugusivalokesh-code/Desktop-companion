@@ -6,6 +6,12 @@ export interface LocalAIConfig {
   timeoutMs: number;
 }
 
+export function getLocalVisionModel(): string | undefined {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+  const model = env.VITE_LOCAL_AI_VISION_MODEL?.trim();
+  return model || undefined;
+}
+
 export const ALLOWED_EMOTIONS: readonly CharacterEmotion[] = [
   "neutral",
   "happy",
@@ -27,12 +33,15 @@ export function isValidEmotion(value: unknown): value is CharacterEmotion {
  * Configured for low-resource local hardware (CPU/iGPU, 8GB RAM).
  */
 export function getLocalAIConfig(): LocalAIConfig {
-  const baseUrl = (import.meta.env.VITE_LOCAL_AI_BASE_URL || "http://localhost:11434").replace(
+  // Vite supplies import.meta.env in the app; the optional fallback keeps the
+  // provider's pure compatibility/error-path tests runnable under Node.
+  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env || {};
+  const baseUrl = (env.VITE_LOCAL_AI_BASE_URL || "http://localhost:11434").replace(
     /\/+$/,
     ""
   );
-  const model = import.meta.env.VITE_LOCAL_AI_MODEL || "llama3.2:3b";
-  const timeoutMs = Number(import.meta.env.VITE_LOCAL_AI_TIMEOUT_MS) || 60000;
+  const model = env.VITE_LOCAL_AI_MODEL || "llama3.2:3b";
+  const timeoutMs = Number(env.VITE_LOCAL_AI_TIMEOUT_MS) || 60000;
 
   return {
     baseUrl,
@@ -62,4 +71,3 @@ Behavior & Tone Rules:
 Response Format:
 Reply ONLY with a valid JSON object:
 {"content": "<reply>", "emotion": "<neutral|happy|satisfied|amused|concerned|sad|disappointed|surprised|annoyed>"}`;
-

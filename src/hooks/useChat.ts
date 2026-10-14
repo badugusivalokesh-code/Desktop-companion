@@ -16,6 +16,7 @@ import {
   formatCompactTaskContext,
 } from "../services/tasks/taskRetriever";
 import { calculateNextOccurrence } from "../services/tasks/recurrence";
+import { captureScreen, isScreenAwarenessRequest } from "../services/screen/screenCapture";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -30,6 +31,12 @@ export interface UseChatReturn {
   sendMessage: (content: string) => Promise<void>;
   clearChat: () => void;
   refreshConnection: () => Promise<void>;
+  capturedScreen: string | null;
+  screenCaptureState: "idle" | "capturing" | "preview";
+  screenError: string | null;
+  captureCurrentScreen: () => Promise<void>;
+  analyzeCapturedScreen: () => Promise<void>;
+  clearCapturedScreen: () => void;
 }
 
 const DEFAULT_GREETING = "Hello. What are you working on today?";
@@ -52,6 +59,12 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>(() => [createInitialMessage()]);
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const [capturedScreen, setCapturedScreen] = useState<string | null>(null);
+  const [screenCaptureState, setScreenCaptureState] = useState<
+    "idle" | "capturing" | "preview"
+  >("idle");
+  const [screenError, setScreenError] = useState<string | null>(null);
+  const screenAnalysisApprovedRef = useRef(false);
 
   // Keep a ref of current messages to prevent race conditions during async replies
   const messagesRef = useRef<ChatMessage[]>(messages);
@@ -76,6 +89,32 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     memoryService.cleanupExpired().catch(() => {});
   }, [refreshConnection]);
 
+  const captureCurrentScreen = useCallback(async () => {
+    setScreenError(null);
+    screenAnalysisApprovedRef.current = false;
+    setScreenCaptureState("capturing");
+    try {
+      const result = await captureScreen();
+      setCapturedScreen(result.dataUrl);
+      setScreenCaptureState("preview");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Screen capture was cancelled.";
+      setScreenError(
+        message.toLowerCase().includes("cancel")
+          ? "Screen capture cancelled. Nothing was analyzed."
+          : `${message} Nothing was analyzed.`
+      );
+      setScreenCaptureState("idle");
+    }
+  }, []);
+
+  const clearCapturedScreen = useCallback(() => {
+    setCapturedScreen(null);
+    screenAnalysisApprovedRef.current = false;
+    setScreenCaptureState("idle");
+    setScreenError(null);
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
@@ -93,6 +132,33 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       setIsTyping(true);
 
       try {
+        if (!capturedScreen && isScreenAwarenessRequest(trimmed)) {
+          await captureCurrentScreen();
+          return;
+        }
+
+        // An approved in-memory capture takes precedence over task/memory
+        // automation. Screen content is analyzed locally and never persisted.
+        if (capturedScreen && screenAnalysisApprovedRef.current) {
+          const response = provider.analyzeImage
+            ? await provider.analyzeImage(capturedScreen, trimmed, messagesRef.current)
+            : {
+                content:
+                  "This chat provider cannot analyze images. The captured screen remains local and was not sent anywhere.",
+                emotion: "concerned" as CharacterEmotion,
+              };
+          const companionMsg: ChatMessage = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            role: "companion",
+            content: response.content,
+            timestamp: Date.now(),
+            emotion: response.emotion,
+          };
+          setMessages((prev) => [...prev, companionMsg]);
+          if (onEmotionChange) onEmotionChange(response.emotion);
+          return;
+        }
+
         // =====================================================================
         // Step 1: Deterministic Task Intent Detection
         // =====================================================================
@@ -450,8 +516,16 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         setIsTyping(false);
       }
     },
-    [isTyping, onEmotionChange, provider, refreshConnection]
+    [captureCurrentScreen, capturedScreen, isTyping, onEmotionChange, provider, refreshConnection]
   );
+
+  const analyzeCapturedScreen = useCallback(async () => {
+    if (!capturedScreen || isTyping) return;
+    screenAnalysisApprovedRef.current = true;
+    await sendMessage(
+      "Describe the captured screen and point out any visible errors or important text."
+    );
+  }, [capturedScreen, isTyping, sendMessage]);
 
   const clearChat = useCallback(() => {
     setMessages([createInitialMessage()]);
@@ -468,5 +542,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     sendMessage,
     clearChat,
     refreshConnection,
+    capturedScreen,
+    screenCaptureState,
+    screenError,
+    captureCurrentScreen,
+    analyzeCapturedScreen,
+    clearCapturedScreen,
   };
 }

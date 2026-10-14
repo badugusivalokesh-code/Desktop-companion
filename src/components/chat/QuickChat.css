@@ -130,6 +130,105 @@
   padding: 0;
 }
 
+.quick-screen-btn {
+  width: auto;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(120, 170, 255, 0.42);
+  background: rgba(70, 110, 210, 0.24);
+  color: rgba(220, 235, 255, 0.9);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.quick-screen-btn:hover:not(:disabled) {
+  background: rgba(90, 140, 240, 0.45);
+}
+
+.quick-screen-btn:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.quick-screen-preview {
+  width: 250px;
+  margin-top: 7px;
+  padding: 8px;
+  border: 1px solid rgba(120, 160, 255, 0.42);
+  border-radius: 10px;
+  background: rgba(12, 16, 30, 0.96);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5);
+  color: rgba(225, 235, 255, 0.88);
+  font-size: 9px;
+}
+
+.quick-screen-preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.quick-screen-preview-header span {
+  color: rgba(160, 205, 180, 0.78);
+}
+
+.quick-screen-preview img {
+  display: block;
+  width: 100%;
+  max-height: 145px;
+  object-fit: contain;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: #05070d;
+}
+
+.quick-screen-preview p {
+  margin: 6px 0;
+  line-height: 1.35;
+  color: rgba(200, 215, 245, 0.64);
+}
+
+.quick-screen-preview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.quick-screen-preview-actions button {
+  border: 1px solid rgba(120, 160, 255, 0.38);
+  border-radius: 6px;
+  padding: 4px 7px;
+  color: rgba(225, 235, 255, 0.9);
+  background: rgba(70, 105, 190, 0.3);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.quick-screen-preview-actions button:first-child {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.quick-screen-preview-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.quick-screen-error {
+  width: 250px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 130, 130, 0.3);
+  border-radius: 7px;
+  color: rgba(255, 190, 190, 0.9);
+  background: rgba(100, 30, 45, 0.28);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
 .quick-send-btn:hover {
   background: rgba(110, 150, 255, 0.55);
   border-color: rgba(160, 190, 255, 0.7);
@@ -236,4 +335,3 @@
   background: rgba(255, 255, 255, 0.15);
   border-radius: 4px;
 }
-

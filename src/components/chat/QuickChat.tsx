@@ -10,6 +10,12 @@ interface QuickChatProps {
   onSendMessage: (content: string) => void;
   onClose: () => void;
   companionName?: string;
+  capturedScreen?: string | null;
+  screenCaptureState?: "idle" | "capturing" | "preview";
+  screenError?: string | null;
+  onCaptureScreen?: () => void;
+  onAnalyzeScreen?: () => void;
+  onClearScreen?: () => void;
 }
 
 /**
@@ -31,6 +37,12 @@ export const QuickChat: React.FC<QuickChatProps> = ({
   onSendMessage,
   onClose,
   companionName = "Makima",
+  capturedScreen = null,
+  screenCaptureState = "idle",
+  screenError = null,
+  onCaptureScreen,
+  onAnalyzeScreen,
+  onClearScreen,
 }) => {
   const [text, setText] = useState("");
   const [dismissedMsgId, setDismissedMsgId] = useState<string | null>(null);
@@ -116,6 +128,22 @@ export const QuickChat: React.FC<QuickChatProps> = ({
           autoComplete="off"
           spellCheck={false}
         />
+        {onCaptureScreen && (
+          <button
+            type="button"
+            className="quick-screen-btn"
+            onClick={onCaptureScreen}
+            disabled={isTyping || screenCaptureState === "capturing"}
+            title="Capture Screen — nothing is analyzed until you approve the preview"
+            aria-label="Capture Screen"
+          >
+            {screenCaptureState === "capturing"
+              ? "Capturing…"
+              : capturedScreen
+              ? "Recapture Screen"
+              : "Capture Screen"}
+          </button>
+        )}
         {canSend && (
           <button
             type="button"
@@ -128,6 +156,31 @@ export const QuickChat: React.FC<QuickChatProps> = ({
           </button>
         )}
       </div>
+
+      {screenError && (
+        <div className="quick-screen-error" role="status">
+          {screenError}
+        </div>
+      )}
+
+      {capturedScreen && (
+        <div className="quick-screen-preview" role="dialog" aria-label="Captured screen preview">
+          <div className="quick-screen-preview-header">
+            <strong>Screen capture ready</strong>
+            <span>Local only · not saved</span>
+          </div>
+          <img src={capturedScreen} alt="Preview of the user-approved screen capture" />
+          <p>Review this image before analysis. Follow-up chat messages will use this capture until you clear it.</p>
+          <div className="quick-screen-preview-actions">
+            <button type="button" onClick={onClearScreen} disabled={isTyping}>
+              Cancel / Clear
+            </button>
+            <button type="button" onClick={onAnalyzeScreen} disabled={isTyping}>
+              {isTyping ? "Analyzing…" : "Analyze locally"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Typing indicator ─────────────────────────────────────────────── */}
       {isTyping && (
