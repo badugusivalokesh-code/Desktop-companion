@@ -1,0 +1,12 @@
+[[permission]]
+identifier = "files"
+description = "Read-only, approved-folder file commands for the main window"
+commands.allow = [
+  "file_select_folder",
+  "file_revoke_folder",
+  "file_get_approved_folder",
+  "file_list",
+  "file_read",
+  "file_search_filenames",
+  "file_search_text"
+]

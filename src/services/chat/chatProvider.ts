@@ -29,4 +29,12 @@ export interface ChatProvider {
     prompt: string,
     history?: ChatMessage[]
   ): Promise<ChatResponse>;
+
+  /** Optional local-only analysis of explicitly selected, bounded file text. */
+  analyzeFileContext?(
+    context: string,
+    request: string,
+    /** Retained for provider compatibility; file analysis must ignore it. */
+    history?: ChatMessage[]
+  ): Promise<ChatResponse>;
 }

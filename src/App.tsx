@@ -6,6 +6,7 @@ import ContextMenu, { type ContextMenuAction } from "./components/ui/ContextMenu
 import { useChat } from "./hooks/useChat";
 import type { CharacterEmotion } from "./types/character";
 import { reminderEngine } from "./services/tasks/reminderEngine";
+import { fileService } from "./services/files/fileService";
 import "./App.css";
 
 /**
@@ -31,6 +32,7 @@ function App() {
   const [panelMode, setPanelMode]   = useState<PanelMode>("chat");
   const [emotion,   setEmotion]     = useState<CharacterEmotion>("neutral");
   const [ctx,       setCtx]         = useState<CtxState>({ open: false, x: 0, y: 0 });
+  const [approvedFolder, setApprovedFolder] = useState<string | null>(null);
 
   // Refs for differentiating click vs drag on the character
   const isMouseDownRef = useRef(false);
@@ -66,6 +68,30 @@ function App() {
   useEffect(() => {
     reminderEngine.start();
     return () => reminderEngine.stop();
+  }, []);
+
+  useEffect(() => {
+    fileService.getApprovedFolder().then((folder) => {
+      setApprovedFolder(folder?.path ?? null);
+    }).catch(() => setApprovedFolder(null));
+  }, []);
+
+  const selectApprovedFolder = useCallback(async () => {
+    try {
+      const folder = await fileService.selectFolder();
+      if (folder) setApprovedFolder(folder.path);
+    } catch (error) {
+      console.warn("[Files] Could not approve folder:", error);
+    }
+  }, []);
+
+  const revokeApprovedFolder = useCallback(async () => {
+    try {
+      await fileService.revokeFolder();
+      setApprovedFolder(null);
+    } catch (error) {
+      console.warn("[Files] Could not revoke folder:", error);
+    }
   }, []);
 
   /* ── Character click vs drag handling ─────────────────────────────────── */
@@ -233,6 +259,9 @@ function App() {
         onCaptureScreen={captureCurrentScreen}
         onAnalyzeScreen={analyzeCapturedScreen}
         onClearScreen={clearCapturedScreen}
+        approvedFolder={approvedFolder}
+        onSelectFolder={selectApprovedFolder}
+        onRevokeFolder={revokeApprovedFolder}
         companionName="Makima"
       />
 

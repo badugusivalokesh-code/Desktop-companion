@@ -1,9 +1,11 @@
 pub mod db;
 pub mod memory_commands;
 pub mod task_commands;
+pub mod file_commands;
 
 use memory_commands::*;
 use task_commands::*;
+use file_commands::*;
 use tauri::Manager;
 
 #[tauri::command]
@@ -16,10 +18,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db_state = db::init_database(app.handle())
                 .map_err(|e| Box::<dyn std::error::Error>::from(e))?;
             app.manage(db_state);
+            app.manage(file_commands::FileAccessState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -45,7 +49,14 @@ pub fn run() {
             task_complete_occurrence,
             task_pause,
             task_resume,
-            task_overdue
+            task_overdue,
+            file_select_folder,
+            file_revoke_folder,
+            file_get_approved_folder,
+            file_list,
+            file_read,
+            file_search_filenames,
+            file_search_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

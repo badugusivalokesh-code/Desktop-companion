@@ -17,6 +17,9 @@ import {
 } from "../services/tasks/taskRetriever";
 import { calculateNextOccurrence } from "../services/tasks/recurrence";
 import { captureScreen, isScreenAwarenessRequest } from "../services/screen/screenCapture";
+import { detectFileIntent } from "../services/files/fileIntent";
+import { fileService } from "../services/files/fileService";
+import { executeFileIntent } from "../services/files/fileTools";
 
 export interface UseChatOptions {
   provider?: ChatProvider;
@@ -69,6 +72,8 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
   // Keep a ref of current messages to prevent race conditions during async replies
   const messagesRef = useRef<ChatMessage[]>(messages);
   messagesRef.current = messages;
+  const providerHistory = () =>
+    messagesRef.current.filter((message) => !message.excludeFromProviderContext);
 
   const refreshConnection = useCallback(async () => {
     if (provider.checkConnection) {
@@ -141,7 +146,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         // automation. Screen content is analyzed locally and never persisted.
         if (capturedScreen && screenAnalysisApprovedRef.current) {
           const response = provider.analyzeImage
-            ? await provider.analyzeImage(capturedScreen, trimmed, messagesRef.current)
+            ? await provider.analyzeImage(capturedScreen, trimmed, providerHistory())
             : {
                 content:
                   "This chat provider cannot analyze images. The captured screen remains local and was not sent anywhere.",
@@ -156,6 +161,25 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
           };
           setMessages((prev) => [...prev, companionMsg]);
           if (onEmotionChange) onEmotionChange(response.emotion);
+          return;
+        }
+
+        const fileIntent = detectFileIntent(trimmed);
+        if (fileIntent) {
+          const fileResult = await executeFileIntent(fileIntent, trimmed, {
+            service: fileService,
+            analyzer: provider,
+          });
+          const companionMsg: ChatMessage = {
+            id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            role: "companion",
+            content: fileResult.content,
+            timestamp: Date.now(),
+            emotion: fileResult.emotion,
+            excludeFromProviderContext: true,
+          };
+          setMessages((prev) => [...prev, companionMsg]);
+          if (onEmotionChange) onEmotionChange(fileResult.emotion);
           return;
         }
 
@@ -488,7 +512,7 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
         // =====================================================================
         const response: ChatResponse = await provider.sendMessage(
           trimmed,
-          messagesRef.current,
+          providerHistory(),
           combinedContext || undefined
         );
 

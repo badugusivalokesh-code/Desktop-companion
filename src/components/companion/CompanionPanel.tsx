@@ -32,6 +32,9 @@ interface CompanionPanelProps {
   onCaptureScreen?: () => void;
   onAnalyzeScreen?: () => void;
   onClearScreen?: () => void;
+  approvedFolder?: string | null;
+  onSelectFolder?: () => void;
+  onRevokeFolder?: () => void;
   /** Companion name to display */
   companionName?: string;
 }
@@ -58,6 +61,9 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
   onCaptureScreen,
   onAnalyzeScreen,
   onClearScreen,
+  approvedFolder,
+  onSelectFolder,
+  onRevokeFolder,
   companionName = "Makima",
 }) => {
   // Local sub-navigation state: null = main settings, "memory" | "tasks" = sub-panels
@@ -127,6 +133,25 @@ const CompanionPanel: React.FC<CompanionPanelProps> = ({
               <span className="settings-label">Character</span>
               <span className="settings-value">Makima</span>
             </div>
+
+            <div className="settings-row settings-row--file-access">
+              <span className="settings-icon">📂</span>
+              <span className="settings-label">Files</span>
+              <span className="settings-value" title={approvedFolder || "No folder approved"}>
+                {approvedFolder ? approvedFolder : "No folder approved"}
+              </span>
+              {onSelectFolder && (
+                <button type="button" className="settings-file-btn" onClick={onSelectFolder}>
+                  {approvedFolder ? "Change" : "Select"}
+                </button>
+              )}
+              {approvedFolder && onRevokeFolder && (
+                <button type="button" className="settings-file-btn settings-file-btn--revoke" onClick={onRevokeFolder}>
+                  Revoke
+                </button>
+              )}
+            </div>
+            <p className="panel-placeholder-hint">File access is read-only, session-scoped, and excludes secrets, dependencies, builds, binaries, and Git internals.</p>
             <div className="settings-row">
               <span className="settings-icon">⚡</span>
               <span className="settings-label">Engine</span>

@@ -8,6 +8,8 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   emotion?: CharacterEmotion;
+  /** File-derived responses stay visible in this chat but are not reused as model context. */
+  excludeFromProviderContext?: boolean;
 }
 
 export interface ChatResponse {

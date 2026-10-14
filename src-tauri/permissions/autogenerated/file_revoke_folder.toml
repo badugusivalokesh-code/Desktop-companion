@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-revoke-folder"
+description = "Enables the file_revoke_folder command without any pre-configured scope."
+commands.allow = ["file_revoke_folder"]
+
+[[permission]]
+identifier = "deny-file-revoke-folder"
+description = "Denies the file_revoke_folder command without any pre-configured scope."
+commands.deny = ["file_revoke_folder"]

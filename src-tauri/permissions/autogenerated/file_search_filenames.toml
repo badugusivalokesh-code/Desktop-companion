@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-file-search-filenames"
+description = "Enables the file_search_filenames command without any pre-configured scope."
+commands.allow = ["file_search_filenames"]
+
+[[permission]]
+identifier = "deny-file-search-filenames"
+description = "Denies the file_search_filenames command without any pre-configured scope."
+commands.deny = ["file_search_filenames"]

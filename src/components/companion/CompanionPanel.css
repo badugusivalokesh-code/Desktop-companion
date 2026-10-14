@@ -181,6 +181,34 @@
   font-weight: 600;
 }
 
+.settings-row--file-access .settings-value {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+}
+
+.settings-file-btn {
+  border: 1px solid rgba(120, 160, 255, 0.35);
+  border-radius: 5px;
+  padding: 3px 5px;
+  color: rgba(225, 235, 255, 0.9);
+  background: rgba(70, 105, 190, 0.28);
+  font-size: 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-file-btn:hover {
+  background: rgba(90, 135, 235, 0.45);
+}
+
+.settings-file-btn--revoke {
+  background: rgba(130, 45, 65, 0.3);
+  border-color: rgba(255, 130, 150, 0.28);
+}
+
 /* ─── Clickable navigation row (Memory entry) ──────────────────────────────── */
 
 .settings-row--link {
